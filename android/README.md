@@ -2,7 +2,7 @@
 
 Android用の仮想キーボード（IME）。日本語QWERTYでは **日英自動判別が実装済み**。既存のC# `Meltype.Core` を **NativeAOT + JNI** で共有し、Kotlinで判別ロジックを再実装していません。12キーのかな／英字フリック入力は既存のKotlinエンジンを継続使用します。
 
-このブランチは、[本家のAndroid版Draft PR #621](https://github.com/yksr-melt/Meltype/pull/621) の開発元 `ninjin0802/Meltype:android` に対する機能追加です。正式リリースではなく、実機検証済みの開発・QA版です。
+このブランチは、[ninjin0802さんのAndroid試作PR #621](https://github.com/yksr-melt/Meltype/pull/621) を土台にした [本家向け統合PR #1149](https://github.com/yksr-melt/Meltype/pull/1149) の提出ソースです。元のAndroid実装への貢献・クレジットを維持し、レビューの一本化を提案しています。正式リリースではなく、実機検証済みの開発・QA版です。
 
 ## 実装済みの主な機能
 
