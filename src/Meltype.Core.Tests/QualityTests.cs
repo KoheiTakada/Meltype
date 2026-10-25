@@ -107,6 +107,36 @@ internal static class Quality
         new("混在", "kyouhagoogledekensaku", "きょうはgoogleでけんさく"),
         new("混在", "tanaka@example.com", "tanaka@example.com"),
         new("混在", "yamada.taro@example.co.jp", "yamada.taro@example.co.jp"),
+        // 英単語の最後の d / t と は (android|ha の dha = でゃ にしない: issue #1044)
+        new("混在", "Androidha", "Androidは"),
+        new("混在", "kyouhaAndroidhaii", "きょうはAndroidはいい"),
+        new("混在", "Androidwa", "Androidわ"),
+        new("混在", "redditwo", "redditを"),
+        new("混在", "Discordha", "Discordは"),
+        new("日本語", "dhisuku", "でぃすく"),
+        // 英単語 + と + っ で始まる続き (not|to|tte) は、っ の綴りで続く日本語 (則って: issue #1030)
+        new("日本語", "nottotte", "のっとって"),
+        new("日本語", "kanreininottotte", "かんれいにのっとって"),
+        new("混在", "exceltoppt", "excelとppt"),
+        new("混在", "pythontoffmpeg", "pythonとffmpeg"),
+        new("混在", "cattodog", "catとdog"),
+        // 数字の前後がかなとして読める (huuso|ku|6|me) のは、略語 (i18n) ではなく数字を挟んだ日本語 (issue #1017)
+        new("日本語", "huusoku6me-toru", "ふうそく6めーとる"),
+        new("記号・数字", "e2e", "e2e"),
+        new("記号・数字", "o2o", "o2o"),
+        new("混在", "i18n", "i18n"),
+        new("混在", "k8s", "k8s"),
+        new("混在", "h2o", "h2o"),
+        // 日本語 + 大文字 1 文字 + 数字 (kamiwo|A4) は、名前の最後の大文字 (holoX) ではない (issue #1005)
+        new("混在", "sonodokyumentowoA4saizudeinsatushitekudasai", "そのどきゅめんとをA4さいずでいんさつしてください"),
+        new("混在", "kamiwoA4", "かみをA4"),
+        new("混在", "galaxyS24", "galaxyS24"),
+        new("混在", "xperiaZ5", "xperiaZ5"),
+        new("混在", "kyouhaA", "きょうはA"),
+        new("混在", "holoX", "holoX"),
+        // ツール名 (Claude Code): code の de を助詞にしない (issue #1001)
+        new("英語", "claudecode", "claudecode"),
+        new("混在", "claudecodewotukau", "claudecodeをつかう"),
         new("混在", "foo_bar@example.com", "foo_bar@example.com"),
         new("混在", "taro+news@example.com", "taro+news@example.com"),
         new("混在", "yamada-taro@example.com", "yamada-taro@example.com"),
@@ -336,7 +366,7 @@ internal static class Quality
         ("Windows PowerShell", false),
     ];
 
-    /// <summary>よく使う英単語 (IME 自動切替で日本語と誤判定しないか)。</summary>
+    /// <summary>よく使う英単語 (英数状態の検知で日本語と誤判定しないか)。</summary>
     private static readonly string[] CommonEnglish =
     [
         "the", "this", "that", "with", "from", "have", "what", "when", "where", "which", "there", "their", "would", "could", "should",
@@ -421,18 +451,18 @@ Dictionary<string, (int Pass, int Total)> ByCategory, List<string> Failures, Lis
             Score("文章ファイル", actual == expected, $"「{title}」→ {actual} (期待: {expected})");
         }
 
-        // IME 自動切替 (打ち始めの数文字で Microsoft IME を ON にするか): 日本語の辞書の語は英語と決めつけない、よく使う英単語は日本語にしない。
+        // 英数状態の検知 (打ち始めの数文字がローマ字なら日本語入力に戻すか): 日本語の辞書の語は英語と決めつけない、よく使う英単語は日本語にしない。
         var scoreEngine = TestSupport.CreateEngine();
         var japaneseWords = DictionarySource.Load("japanese.txt", null).Where(w => w.Length >= 4).Distinct().ToList();
         foreach (var word in japaneseWords)
         {
             var result = TestSupport.Classify(scoreEngine, word);
-            Score("自動切替: 日本語", result.Verdict != Verdict.English, $"{word} → {result.Verdict} ({result.Summary})");
+            Score("英数状態の検知: 日本語", result.Verdict != Verdict.English, $"{word} → {result.Verdict} ({result.Summary})");
         }
         foreach (var word in CommonEnglish)
         {
             var result = TestSupport.Classify(scoreEngine, word);
-            Score("自動切替: 英語", result.Verdict != Verdict.Japanese, $"{word} → {result.Verdict} ({result.Summary})");
+            Score("英数状態の検知: 英語", result.Verdict != Verdict.Japanese, $"{word} → {result.Verdict} ({result.Summary})");
         }
 
         // 絵文字・顔文字の候補

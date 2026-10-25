@@ -21,7 +21,7 @@ Usage: mac/build-cli.sh [options]
 
 Options:
   --setup       Install .NET 10 SDK into ~/.dotnet if dotnet is missing.
-  --test        Run Meltype.Core.Tests.
+  --test        Run Meltype.Core.Tests and the Mac shortcut tests.
   --build       Build mac/build/Meltype.app without installing it.
   --install     Build and install Meltype.app into ~/Library/Input Methods.
   --all         Run --test --install. This is the default.
@@ -75,8 +75,13 @@ if [[ $setup -eq 1 ]]; then
     need swift
     ensure_dotnet_path
     if ! command -v dotnet >/dev/null 2>&1; then
-        curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
-        bash /tmp/dotnet-install.sh --channel 10.0 --install-dir "$HOME/.dotnet"
+        # /tmp の固定名は別ユーザーに差し替えられるので、自分専用の一時ディレクトリに置く。
+        dotnet_tmp="$(mktemp -d)"
+        trap 'rm -rf "$dotnet_tmp"' EXIT
+        curl -fsSL https://dot.net/v1/dotnet-install.sh -o "$dotnet_tmp/dotnet-install.sh"
+        bash "$dotnet_tmp/dotnet-install.sh" --channel 10.0 --install-dir "$HOME/.dotnet"
+        rm -rf "$dotnet_tmp"
+        trap - EXIT
         export PATH="$HOME/.dotnet:$PATH"
         echo 'Add this to your shell profile if dotnet is still not found:'
         echo '  export PATH="$HOME/.dotnet:$PATH"'
@@ -88,6 +93,8 @@ ensure_dotnet_path
 if [[ $test_core -eq 1 ]]; then
     need dotnet
     dotnet run --project "$root/src/Meltype.Core.Tests"
+    need swift
+    swift test --package-path "$here"
 fi
 
 if [[ $build_only -eq 1 ]]; then

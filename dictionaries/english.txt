@@ -38,6 +38,8 @@ typedef enum struct public private protected static void int integer string stri
 false null nil undefined none self this new delete object objects array arrays list lists map maps set
 dict tuple float double char byte bytes long short args argv printf println print echo error errors warn
 warning info trace exception exceptions try catch finally throw raise def lambda yield await async
+# infobesity は情報過多。ty が残って いんふぉべしty になっていた (issue #538)
+infobesity
 while for if else elif switch case default goto break continue unset source alias sudo kill ps top
 make makefile cmake meson ninja gcc clang llvm msbuild nuget winget choco scoop brew apt yum dnf pacman
 node_modules dist bin obj lib src tmp temp var etc usr opt home desktop documents downloads
@@ -216,3 +218,39 @@ riverside seaside teenage teenager woah mod mods hardcore tacz nsfw sfw fbc mine
 online
 # --- 英単語 + する (pushして) の site と同じ綴りで終わる語 (web + site で分けない) ---
 website websites campsite worksite onsite offsite
+# Issue #616
+whois
+# Issue #683
+guesstimation
+# Issue #686
+enshittification
+# Issue #689
+finfluencer
+# Issue #692
+greedflation
+# Issue #725
+openstreetmap
+# Issue #726
+malvertising
+# Issue #730
+adtech
+# Issue #731
+robonomics
+# Issue #733
+netizenry
+# Issue #735
+tver
+# Issue #249
+mozc
+
+# Issue #822
+autoclicker
+clicker
+# Issue #826
+ext
+
+# Issue #835
+docs
+
+# Issue #887
+exe
