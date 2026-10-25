@@ -31,6 +31,9 @@ object Layouts {
     private fun language(width: Float = 1f) = key(KeyAction.Language, "あa", "かな・英字切り替え", width)
     private fun comma() = key(KeyAction.Text(","), ",")
     private fun period() = key(KeyAction.Text("."), ".")
+    private fun punct(label: String, width: Float = 1f) = key(KeyAction.Text(label), label, width = width)
+    private fun moreSymbols() = key(KeyAction.Switch(LayoutId.SYMBOLS2), "#+=", "記号2ページ", 1.5f)
+    private fun firstSymbols() = key(KeyAction.Switch(LayoutId.SYMBOLS), "123", "記号1ページ", 1.5f)
 
     val kana: KeyboardLayout by lazy {
         fun k(key: FlickKey) = key(KeyAction.Flick(key), if (key == KanaKeys.PUNCT) "、。?!" else key.chars.first().toString())
@@ -50,7 +53,7 @@ object Layouts {
             0f to texts("qwertyuiop"),
             0.5f to texts("asdfghjkl"),
             0f to listOf(picture(KeyAction.Shift, "シフト", 1.5f)) + texts("zxcvbnm") + delete(1.5f),
-            0f to listOf(language(1.25f), symbols(1.25f), emoji(), comma(), space(3f), period(), enter(1.5f)),
+            0f to listOf(symbols(1.65f), comma(), space(4.45f), period(), enter(1.9f)),
         )))
     }
 
@@ -62,7 +65,7 @@ object Layouts {
             0f to letters("qwertyuiop"),
             0f to letters("asdfghjkl") + mark('-', "ー"),
             0f to listOf(picture(KeyAction.Shift, "シフト", 1.5f)) + letters("zxcvbnm") + delete(1.5f),
-            0f to listOf(language(1.25f), symbols(1.25f), emoji(), mark(',', "、"), space(3f), mark('.', "。"), enter(1.5f)),
+            0f to listOf(symbols(1.65f), punct("、"), space(4.45f), punct("。"), enter(1.9f)),
         )))
     }
 
@@ -83,12 +86,22 @@ object Layouts {
     val symbols: KeyboardLayout by lazy {
         KeyboardLayout(LayoutId.SYMBOLS, 10f, 4, build(listOf(
             0f to texts("1234567890"),
-            0f to texts("-/:;()¥&@\""),
-            0f to texts("#%*+=_~「」") + delete(),
-            0f to listOf(
-                key(KeyAction.Back, backLabel(LayoutId.KANA), "前の配列に戻る", 1.5f),
-                emoji(), comma(), space(4f), period(), enter(1.5f),
-            ),
+            0f to texts("-/:@()「」¥&"),
+            0f to listOf(moreSymbols(), punct("。", 1.3f), punct("、", 1.3f),
+                punct("?", 1.3f), punct("!", 1.3f), punct("^^", 1.5f), delete(1.8f)),
+            0f to listOf(key(KeyAction.Back, "あいう", "前の配列に戻る", 2.2f),
+                space(5.5f), enter(2.3f)),
+        )))
+    }
+
+    val symbols2: KeyboardLayout by lazy {
+        KeyboardLayout(LayoutId.SYMBOLS2, 10f, 4, build(listOf(
+            0f to texts("[]{}#%^*+="),
+            0f to texts("_\\;|<>\"'$€"),
+            0f to listOf(firstSymbols(), punct(".", 1.3f), punct(",", 1.3f),
+                punct("?", 1.3f), punct("!", 1.3f), punct("•", 1.5f), delete(1.8f)),
+            0f to listOf(key(KeyAction.Back, "あいう", "前の配列に戻る", 2.2f),
+                space(5.5f), enter(2.3f)),
         )))
     }
 
@@ -103,7 +116,7 @@ object Layouts {
 
     private val emojiBars: Map<LayoutId, KeyboardLayout> by lazy {
         LayoutId.entries.associateWith { origin ->
-            val label = if (origin == LayoutId.SYMBOLS) "?123" else backLabel(origin)
+            val label = if (origin == LayoutId.SYMBOLS || origin == LayoutId.SYMBOLS2) "?123" else backLabel(origin)
             KeyboardLayout(origin, 10f, 1, build(listOf(
                 0f to listOf(key(KeyAction.Switch(origin), label, "キーボードに戻る", 1.5f), space(5.5f), delete(1.5f), enter(1.5f)),
             )))
@@ -116,5 +129,6 @@ object Layouts {
         LayoutId.QWERTY -> qwerty
         LayoutId.LATIN_FLICK -> latinFlick
         LayoutId.SYMBOLS -> symbols
+        LayoutId.SYMBOLS2 -> symbols2
     }
 }

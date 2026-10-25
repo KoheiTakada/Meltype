@@ -24,7 +24,9 @@ public sealed record CompositionView(
     string? Suggestion = null,
     IReadOnlyList<string>? Predictions = null,
     int SelectedPrediction = -1,
-    string? Typed = null);
+    string? Typed = null,
+    string? Raw = null,
+    string? Kana = null);
 
 /// <summary>CompositionController が外界とやり取りする口。テストでは偽物に差し替える。</summary>
 public interface ICompositionHost
@@ -2489,7 +2491,8 @@ public sealed class CompositionController
             var selected = _predictionIndex >= 0 ? _predictions[_predictionIndex] : null;
             var display = selected ?? CurrentDisplay(final: false);
             _host.Show(new CompositionView(display, preview ?? [], preview?.IndexOf(display) ?? -1, false, hint, Suggestion: misspelling,
-                Predictions: _predictions.Count > 0 ? _predictions : null, SelectedPrediction: _predictionIndex, Typed: TypedKeys()));
+                Predictions: _predictions.Count > 0 ? _predictions : null, SelectedPrediction: _predictionIndex,
+                Typed: TypedKeys(), Raw: _text.Raw, Kana: _text.AllKana(final: true)));
         }
     }
 

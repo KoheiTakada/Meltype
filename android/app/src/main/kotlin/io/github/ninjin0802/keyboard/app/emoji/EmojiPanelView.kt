@@ -48,8 +48,9 @@ class EmojiPanelView(context: Context) : LinearLayout(context) {
         val strip = object : LinearLayout(context) {
             /** 高さは候補バーと同じ。画面の向きで変わるので、測るたびに今の向きから決める。 */
             override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-                val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-                val height = (EmojiPanelHeights.tabsDp(landscape) * density).toInt()
+                val widthDp = MeasureSpec.getSize(widthMeasureSpec) / density
+                val displayHeightDp = EmojiPanelHeights.viewportHeightDp(resources, density)
+                val height = (EmojiPanelHeights.tabsDp(widthDp, displayHeightDp) * density).toInt()
                 super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY))
             }
         }

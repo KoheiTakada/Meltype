@@ -9,20 +9,27 @@ import io.github.ninjin0802.keyboard.app.view.KeyboardHeights
  * （開いても閉じても、キーボードの高さが変わらない。spec 04）。
  */
 object EmojiPanelHeights {
-    /** ます目が使う、キーの段の数。 */
-    private const val GRID_ROWS = 3
+    fun viewportHeightDp(resources: android.content.res.Resources, density: Float): Float =
+        maxOf(resources.configuration.screenHeightDp.toFloat(),
+            resources.displayMetrics.heightPixels / density)
 
-    fun tabsDp(landscape: Boolean): Int = KeyboardHeights.barDp(landscape)
-    fun gridDp(landscape: Boolean): Int = GRID_ROWS * KeyboardHeights.rowDp(landscape)
-    fun keysDp(landscape: Boolean): Int = KeyboardHeights.rowDp(landscape)
+    fun tabsDp(widthDp: Float, heightDp: Float): Int =
+        KeyboardHeights.forViewport(widthDp, heightDp).barDp
 
-    /**
-     * ます目の高さ（px）。キー4段ぶんの px から、操作キーの行の px を引いた残り。
-     * dp から別々に直すと、切り捨てで合計が 1 px ずれて、開いたときにキーボードの高さが変わる。
-     */
-    fun gridPx(landscape: Boolean, density: Float): Int {
-        val row = KeyboardHeights.rowDp(landscape) * density
-        return (row * (GRID_ROWS + 1)).toInt() - row.toInt()
+    fun keysDp(widthDp: Float, heightDp: Float): Int {
+        val s = KeyboardHeights.forViewport(widthDp, heightDp)
+        return s.rowDp + s.topDp + s.bottomDp
+    }
+
+    fun gridDp(widthDp: Float, heightDp: Float): Int =
+        3 * KeyboardHeights.forViewport(widthDp, heightDp).rowDp
+
+    /** Pixel-perfect: bar + grid + one-row key view == bar + four-row keyboard view. */
+    fun gridPx(widthDp: Float, heightDp: Float, density: Float): Int {
+        val s = KeyboardHeights.forViewport(widthDp, heightDp)
+        val outer = (s.topDp + s.bottomDp) * density
+        return (4f * s.rowDp * density + outer).toInt() -
+            (s.rowDp * density + outer).toInt()
     }
 }
 

@@ -25,24 +25,27 @@ data class Palette(
     val onAccent: Int,
 ) {
     companion object {
-        internal val light = Palette(
-            background = 0xFFD9DCE1.toInt(), key = 0xFFFFFFFF.toInt(), functionKey = 0xFFC2C8D3.toInt(),
-            keyPressed = 0xFFBCC3D0.toInt(), functionKeyPressed = 0xFFA1A9B8.toInt(),
-            pill = 0xFFB3CBFB.toInt(), pillPressed = 0xFF8FAEF0.toInt(), onPill = 0xFF0B2C6B.toInt(),
-            popup = 0xFFE1EAFF.toInt(), popupOutline = 0xFF4C7BE8.toInt(),
-            text = 0xFF1B1D21.toInt(), subText = 0xFF6B7280.toInt(),
-            accent = 0xFF2563EB.toInt(), onAccent = 0xFFFFFFFF.toInt(),
+        // Both visual modes reuse the same keycaps and behavior. The IME scrim
+        // has no hue; underlying content provides all wallpaper tint.
+        private fun create(dark: Boolean): Palette = Palette(
+            background = if (dark) 0xB8CACACA.toInt() else 0xB8F4F4F4.toInt(),
+            key = 0xFFFFFFFF.toInt(),
+            functionKey = 0xFFFFFFFF.toInt(),
+            keyPressed = 0xFFE4E4E6.toInt(),
+            functionKeyPressed = 0xFFE4E4E6.toInt(),
+            pill = 0xFF0069D9.toInt(),
+            pillPressed = 0xFF0056B8.toInt(),
+            onPill = 0xFFFFFFFF.toInt(),
+            popup = 0xFFA2B8DE.toInt(),
+            popupOutline = 0xFF3154A1.toInt(),
+            text = 0xFF1B1D21.toInt(),
+            subText = 0xFF6B7280.toInt(),
+            accent = 0xFF1368D3.toInt(),
+            onAccent = 0xFFFFFFFF.toInt(),
         )
-        internal val dark = Palette(
-            background = 0xFF1B1D21.toInt(), key = 0xFF3A3D44.toInt(), functionKey = 0xFF2A2C31.toInt(),
-            keyPressed = 0xFF565A63.toInt(), functionKeyPressed = 0xFF464A53.toInt(),
-            pill = 0xFF2F4A80.toInt(), pillPressed = 0xFF3F5FA0.toInt(), onPill = 0xFFDCE7FF.toInt(),
-            popup = 0xFF4A5C8C.toInt(), popupOutline = 0xFF9DB8F5.toInt(),
-            text = 0xFFF1F2F4.toInt(), subText = 0xFF9AA0AA.toInt(),
-            accent = 0xFF5B8DEF.toInt(), onAccent = 0xFF101216.toInt(),
-        )
+        internal val light by lazy { create(false) }
+        internal val dark by lazy { create(true) }
 
-        /** 端末のライト/ダークに合わせる。 */
         fun of(context: Context): Palette {
             val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
             return if (night == Configuration.UI_MODE_NIGHT_YES) dark else light

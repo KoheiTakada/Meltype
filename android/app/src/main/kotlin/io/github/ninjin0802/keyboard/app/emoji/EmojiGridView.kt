@@ -90,8 +90,10 @@ class EmojiGridView(context: Context) : View(context) {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), EmojiPanelHeights.gridPx(landscape, density))
+        val widthPx = MeasureSpec.getSize(widthMeasureSpec)
+        val widthDp = widthPx / density
+        val displayHeightDp = EmojiPanelHeights.viewportHeightDp(resources, density)
+        setMeasuredDimension(widthPx, EmojiPanelHeights.gridPx(widthDp, displayHeightDp, density))
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) = updateGrid()

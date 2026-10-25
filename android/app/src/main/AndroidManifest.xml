@@ -6,6 +6,7 @@
         allowBackup="false" だけでは、Android 12 以降の端末から端末への引き継ぎが止まらないので、
         すべてのデータを外す規則も付ける（Android 12 以降は dataExtractionRules、それより前は fullBackupContent）。
     -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -15,6 +16,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:enableOnBackInvokedCallback="true"
             android:windowSoftInputMode="adjustResize|stateHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

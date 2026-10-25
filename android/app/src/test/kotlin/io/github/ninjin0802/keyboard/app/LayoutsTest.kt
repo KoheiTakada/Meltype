@@ -16,7 +16,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class LayoutsTest {
-    private val all = listOf(Layouts.kana, Layouts.romaji, Layouts.qwerty, Layouts.latinFlick, Layouts.symbols)
+    private val all = listOf(Layouts.kana, Layouts.romaji, Layouts.qwerty, Layouts.latinFlick, Layouts.symbols, Layouts.symbols2)
     private fun labels(l: KeyboardLayout, r: Int) = l.keys.filter { it.row == r }.sortedBy { it.col }.joinToString(" ") { it.label }
     private fun names(l: KeyboardLayout, r: Int) = l.keys.filter { it.row == r }.sortedBy { it.col }.joinToString(" ") { it.name }
     private fun widths(l: KeyboardLayout, r: Int) = l.keys.filter { it.row == r }.sortedBy { it.col }.map { it.width }
@@ -44,21 +44,21 @@ class LayoutsTest {
         fun row(r: Int) = Layouts.qwerty.keys.filter { it.row == r }.sortedBy { it.col }.joinToString(" ") { it.label }
         assertEquals("q w e r t y u i o p", row(0)); assertEquals("a s d f g h j k l", row(1))
         assertEquals("シフト z x c v b n m 削除", names(Layouts.qwerty, 2))
-        assertEquals("かな・英字切り替え 記号 絵文字 , 空白 . 確定", names(Layouts.qwerty, 3))
-        assertEquals(listOf(1.25f, 1.25f, 1f, 1f, 3f, 1f, 1.5f), widths(Layouts.qwerty, 3))
+        assertEquals("記号 , 空白 . 確定", names(Layouts.qwerty, 3))
+        assertEquals(listOf(1.65f, 1f, 4.45f, 1f, 1.9f), widths(Layouts.qwerty, 3))
     }
     @Test fun romaji_grid_matches_spec() {
         assertEquals("q w e r t y u i o p", labels(Layouts.romaji, 0)); assertEquals("a s d f g h j k l ー", labels(Layouts.romaji, 1))
         assertEquals("シフト z x c v b n m 削除", names(Layouts.romaji, 2))
-        assertEquals("かな・英字切り替え 記号 絵文字 、 空白 。 確定", names(Layouts.romaji, 3))
+        assertEquals("記号 、 空白 。 確定", names(Layouts.romaji, 3))
         assertEquals(widths(Layouts.qwerty, 3), widths(Layouts.romaji, 3)); assertEquals(widths(Layouts.qwerty, 2), widths(Layouts.romaji, 2))
         assertEquals(List(10) { 1f }, widths(Layouts.romaji, 1)); assertEquals(LayoutId.ROMAJI, Layouts.romaji.id)
         assertEquals(10f, Layouts.romaji.columns); assertEquals(4, Layouts.romaji.rows)
     }
     @Test fun romaji_keys_send_lower_case_letters_and_the_three_marks() {
         val sent = Layouts.romaji.keys.mapNotNull { (it.action as? KeyAction.Romaji)?.char }.joinToString("")
-        assertEquals("qwertyuiopasdfghjkl-zxcvbnm,.", sent)
-        assertTrue(Layouts.romaji.keys.none { it.action is KeyAction.Text || it.action is KeyAction.Flick || it.action == KeyAction.Modify })
+        assertEquals("qwertyuiopasdfghjkl-zxcvbnm", sent)
+        assertTrue(Layouts.romaji.keys.filter { it.action is KeyAction.Text }.map { it.label }.toSet() == setOf("、", "。"))
     }
     @Test fun latin_flick_grid_matches_spec() {
         val l = Layouts.latinFlick
@@ -74,20 +74,20 @@ class LayoutsTest {
     @Test fun latin_flick_has_all_eleven_keys_in_reading_order() =
         assertEquals(LatinKeys.all, Layouts.latinFlick.keys.sortedWith(compareBy({ it.row }, { it.col })).mapNotNull { (it.action as? KeyAction.Flick)?.key })
     @Test fun the_language_key_is_on_the_four_typing_layouts_and_not_on_symbols() {
-        for (l in all) assertEquals(if (l.id == LayoutId.SYMBOLS) 0 else 1, l.keys.count { it.action == KeyAction.Language }, "${l.id}")
+        for (l in all) assertEquals(if (l.id == LayoutId.KANA || l.id == LayoutId.LATIN_FLICK) 1 else 0, l.keys.count { it.action == KeyAction.Language }, "${l.id}")
         for (l in all) assertEquals(if (l.id == LayoutId.SYMBOLS) 0 else 1, l.keys.count { it.action == KeyAction.Switch(LayoutId.SYMBOLS) }, "${l.id}")
     }
     @Test fun layouts_by_id() {
         for (id in LayoutId.entries) assertEquals(id, Layouts.of(id).id)
-        assertEquals(listOf(true, true, false, false, false), LayoutId.entries.map { it.isJapanese })
-        assertEquals(listOf(false, false, true, true, false), LayoutId.entries.map { it.isEnglish })
+        assertEquals(listOf(true, true, false, false, false, false), LayoutId.entries.map { it.isJapanese })
+        assertEquals(listOf(false, false, true, true, false, false), LayoutId.entries.map { it.isEnglish })
     }
     @Test fun symbols_rows() {
         fun row(r: Int) = Layouts.symbols.keys.filter { it.row == r }.sortedBy { it.col }.joinToString(" ") { it.label }
-        assertEquals("1 2 3 4 5 6 7 8 9 0", row(0)); assertEquals("- / : ; ( ) ¥ & @ \"", row(1))
-        assertEquals("# % * + = _ ~ 「 」 削除", names(Layouts.symbols, 2))
-        assertEquals("前の配列に戻る 絵文字 , 空白 . 確定", names(Layouts.symbols, 3))
-        assertEquals(listOf(1.5f, 1f, 1f, 4f, 1f, 1.5f), widths(Layouts.symbols, 3))
+        assertEquals("1 2 3 4 5 6 7 8 9 0", row(0)); assertEquals("- / : @ ( ) 「 」 ¥ &", row(1))
+        assertEquals("記号2ページ 。 、 ? ! ^^ 削除", names(Layouts.symbols, 2))
+        assertEquals("前の配列に戻る 空白 確定", names(Layouts.symbols, 3))
+        assertEquals(listOf(2.2f, 5.5f, 2.3f), widths(Layouts.symbols, 3))
     }
     @Test fun every_row_is_filled_from_edge_to_edge() {
         for (l in all) for (r in 0 until l.rows) {
@@ -120,18 +120,39 @@ class LayoutsTest {
         }
     }
     @Test fun every_layout_has_the_emoji_key_and_only_the_flick_layouts_have_undo() {
-        for (l in all) assertEquals(1, l.keys.count { it.action == KeyAction.Emoji }, "${l.id}")
+        for (l in all) assertEquals(if (l.id == LayoutId.KANA || l.id == LayoutId.LATIN_FLICK) 1 else 0, l.keys.count { it.action == KeyAction.Emoji }, "${l.id}")
         assertEquals(listOf(LayoutId.KANA, LayoutId.LATIN_FLICK), all.filter { l -> l.keys.any { it.action == KeyAction.Undo } }.map { it.id })
     }
     @Test fun text_labels() {
         fun label(l: KeyboardLayout, name: String) = l.keys.single { it.name == name }.label
         assertEquals("?123", label(Layouts.kana, "記号")); assertEquals("あa", label(Layouts.kana, "かな・英字切り替え"))
-        assertEquals("?123", label(Layouts.qwerty, "記号")); assertEquals("あa", label(Layouts.qwerty, "かな・英字切り替え"))
+        assertEquals("?123", label(Layouts.qwerty, "記号")); assertEquals(0, Layouts.qwerty.keys.count { it.action == KeyAction.Language })
     }
     @Test fun back_key_shows_where_it_returns_to() {
         assertEquals("あa", Layouts.backLabel(LayoutId.KANA)); assertEquals("abc", Layouts.backLabel(LayoutId.QWERTY))
         assertEquals("あa", Layouts.backLabel(LayoutId.ROMAJI)); assertEquals("abc", Layouts.backLabel(LayoutId.LATIN_FLICK))
     }
+    @Test fun two_symbol_pages_match_reference_and_keep_punctuation() {
+        val p1 = Layouts.symbols
+        val p2 = Layouts.symbols2
+        assertEquals(LayoutId.SYMBOLS2, (p1.keys.single {
+            it.action == KeyAction.Switch(LayoutId.SYMBOLS2)
+        }.action as KeyAction.Switch).to)
+        assertTrue(p1.keys.any { it.label == "!" })
+        assertTrue(p1.keys.any { it.label == "?" })
+        assertTrue(p1.keys.any { it.label == "。" })
+        assertTrue(p1.keys.any { it.label == "、" })
+        assertEquals(1, p2.keys.count { it.action == KeyAction.Switch(LayoutId.SYMBOLS) })
+        for (layout in listOf(p1, p2)) {
+            for (row in 0 until layout.rows) {
+                assertEquals(10f, layout.keys.filter { it.row == row }.sumOf { it.width.toDouble() }.toFloat(), 0.001f)
+            }
+        }
+        assertTrue(Layouts.romaji.keys.any { it.label == "。" })
+        assertTrue(Layouts.romaji.keys.any { it.label == "、" })
+        assertTrue(Layouts.romaji.keys.none { it.action == KeyAction.Language })
+    }
+
     @Test fun emoji_bar_is_one_row_filled_edge_to_edge() {
         for (origin in LayoutId.entries) {
             val bar = Layouts.emojiBar(origin)

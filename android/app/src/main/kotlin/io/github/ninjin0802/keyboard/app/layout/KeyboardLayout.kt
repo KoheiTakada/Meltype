@@ -9,7 +9,7 @@ import io.github.ninjin0802.keyboard.engine.FlickKey
  * それぞれ、設定で選んである方だけが出る。
  */
 enum class LayoutId {
-    KANA, ROMAJI, QWERTY, LATIN_FLICK, SYMBOLS;
+    KANA, ROMAJI, QWERTY, LATIN_FLICK, SYMBOLS, SYMBOLS2;
 
     val isJapanese: Boolean get() = this == KANA || this == ROMAJI
     val isEnglish: Boolean get() = this == QWERTY || this == LATIN_FLICK

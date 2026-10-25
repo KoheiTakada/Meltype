@@ -11,28 +11,33 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class EmojiGridGeometryTest {
-    @Test fun panel_is_as_tall_as_the_bar_and_four_rows_in_both_orientations() {
-        for (landscape in listOf(false, true)) {
-            val keyboard = KeyboardHeights.barDp(landscape) + 4 * KeyboardHeights.rowDp(landscape)
-            assertEquals(
-                keyboard,
-                EmojiPanelHeights.tabsDp(landscape) + EmojiPanelHeights.gridDp(landscape) + EmojiPanelHeights.keysDp(landscape),
-                "landscape=$landscape",
-            )
-            assertEquals(KeyboardHeights.barDp(landscape), EmojiPanelHeights.tabsDp(landscape))
-            assertEquals(KeyboardHeights.rowDp(landscape), EmojiPanelHeights.keysDp(landscape))
+    @Test fun emojiPanelUsesTheSameViewportGeometryAsKeyboard() {
+        for ((width, height) in listOf(
+            410f to 915f, 840f to 390f, 1050f to 470f, 960f to 680f,
+        )) {
+            val g = KeyboardHeights.forViewport(width, height)
+            assertEquals(g.barDp, EmojiPanelHeights.tabsDp(width, height))
+            assertEquals(3 * g.rowDp, EmojiPanelHeights.gridDp(width, height))
+            assertEquals(g.rowDp + g.topDp + g.bottomDp,
+                EmojiPanelHeights.keysDp(width, height))
+            assertEquals(g.barDp + 4 * g.rowDp + g.topDp + g.bottomDp,
+                EmojiPanelHeights.tabsDp(width, height) +
+                    EmojiPanelHeights.gridDp(width, height) +
+                    EmojiPanelHeights.keysDp(width, height))
         }
-        assertEquals(162, EmojiPanelHeights.gridDp(false)); assertEquals(120, EmojiPanelHeights.gridDp(true))
     }
-    /** dp を px に直すときの切り捨てで、1 px もずれない（キーの View は「段の高さ × 段の数」を切り捨てる）。 */
-    @Test fun panel_is_exactly_as_tall_in_pixels_at_any_density() {
-        for (density in listOf(1f, 1.5f, 2f, 2.625f, 2.75f, 3f, 3.5f, 4f)) for (landscape in listOf(false, true)) {
-            val bar = (KeyboardHeights.barDp(landscape) * density).toInt()
-            val fourRows = (KeyboardHeights.rowDp(landscape) * density * 4).toInt()
-            val oneRow = (KeyboardHeights.rowDp(landscape) * density * 1).toInt()
-            assertEquals(bar + fourRows, bar + EmojiPanelHeights.gridPx(landscape, density) + oneRow, "$density $landscape")
-        }
-        assertEquals(425 + 1, EmojiPanelHeights.gridPx(false, 2.625f))   // 確認に使うエミュレーター: 567 − 141
+
+    @Test fun emojiPanelMatchesKeyboardPixelsAtAllCommonDensities() {
+        for ((w, h) in listOf(410f to 915f, 1050f to 470f, 960f to 680f))
+            for (density in listOf(1f, 1.5f, 2f, 2.625f, 2.75f, 3f, 3.5f, 4f)) {
+                val g = KeyboardHeights.forViewport(w, h)
+                val bar = (g.barDp * density).toInt()
+                val outer = (g.topDp + g.bottomDp) * density
+                val keyboard = (4f * g.rowDp * density + outer).toInt()
+                val oneKeyRow = (g.rowDp * density + outer).toInt()
+                val emoji = bar + EmojiPanelHeights.gridPx(w, h, density) + oneKeyRow
+                assertEquals(bar + keyboard, emoji, "$w x $h, density $density")
+            }
     }
     @Test fun eight_columns_in_portrait_and_more_in_landscape() {
         assertEquals(8, emojiColumns(320f)); assertEquals(8, emojiColumns(360f)); assertEquals(8, emojiColumns(411f))

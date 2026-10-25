@@ -40,7 +40,7 @@ class ScreenCoordinatorTest {
 
     @Test fun composing_text_is_committed_before_the_emoji_panel_opens() {
         screens.fieldStarted(KANA)
-        assertEquals(listOf("commit", "emoji:KANA"), did { screens.openEmoji(0L) })
+        assertEquals(listOf("emoji:KANA"), did { screens.openEmoji(0L) })
     }
 
     @Test fun the_return_key_closes_the_panel_and_shows_the_layout_it_was_opened_from() {
@@ -48,16 +48,16 @@ class ScreenCoordinatorTest {
             screens.fieldStarted(first)
             val origin = nav.current
             screens.openEmoji(0L)
-            assertEquals(listOf("commit", "keyboard:$origin"), did { screens.switchTo(origin) })
+            assertEquals(listOf("keyboard:$origin"), did { screens.switchTo(origin) })
             assertFalse(nav.emojiOpen)
         }
     }
 
-    @Test fun every_layout_switch_commits_first_and_then_shows_the_keyboard() {
+    @Test fun navigating_layouts_keeps_uncommitted_text_intact() {
         screens.fieldStarted(KANA)
-        assertEquals(listOf("commit", "keyboard:QWERTY"), did { screens.language() })
-        assertEquals(listOf("commit", "keyboard:SYMBOLS"), did { screens.switchTo(SYMBOLS) })
-        assertEquals(listOf("commit", "keyboard:QWERTY"), did { screens.back() })
+        assertEquals(listOf("keyboard:QWERTY"), did { screens.language() })
+        assertEquals(listOf("keyboard:SYMBOLS"), did { screens.switchTo(SYMBOLS) })
+        assertEquals(listOf("keyboard:QWERTY"), did { screens.back() })
     }
 
     /** 入力欄が替わったとき、キーボードが出し直されたとき。絵文字の画面は閉じて、その欄の最初の配列を出す。 */
@@ -96,10 +96,10 @@ class ScreenCoordinatorTest {
     }
 
     /** 絵文字の画面がまだ作られていないとき。開いたことにしない（開いたことにすると、あa と戻るキーが効かなくなる）。 */
-    @Test fun the_emoji_key_does_nothing_but_commit_when_there_is_no_panel() {
+    @Test fun the_emoji_key_does_not_commit_when_there_is_no_panel() {
         screens.fieldStarted(KANA); panelExists = false
-        assertEquals(listOf("commit"), did { screens.openEmoji(0L) })
+        assertEquals(emptyList(), did { screens.openEmoji(0L) })
         assertFalse(nav.emojiOpen)
-        assertEquals(listOf("commit", "keyboard:QWERTY"), did { screens.language() })
+        assertEquals(listOf("keyboard:QWERTY"), did { screens.language() })
     }
 }

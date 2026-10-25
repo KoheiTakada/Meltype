@@ -28,6 +28,25 @@ class Settings(context: Context) {
         get() = englishOf(prefs.getString(KEY_ENGLISH_LAYOUT, null))
         set(value) { prefs.edit().putString(KEY_ENGLISH_LAYOUT, savedName(value)).apply() }
 
+    /** Japanese layout only. Japanese space defaults to full-width, like the original layout. */
+    var japaneseSpaceFullWidth: Boolean
+        get() = prefs.getBoolean(KEY_JAPANESE_SPACE_FULL_WIDTH, true)
+        set(value) { prefs.edit().putBoolean(KEY_JAPANESE_SPACE_FULL_WIDTH, value).apply() }
+
+    /** Hides emoji keys/panel and suppresses emoji suggestions when disabled. */
+    var emojiEnabled: Boolean
+        get() = prefs.getBoolean(KEY_EMOJI_ENABLED, true)
+        set(value) { prefs.edit().putBoolean(KEY_EMOJI_ENABLED, value).apply() }
+
+    var hapticEnabled: Boolean
+        get() = prefs.getBoolean(KEY_HAPTIC_ENABLED, true)
+        set(value) { prefs.edit().putBoolean(KEY_HAPTIC_ENABLED, value).apply() }
+
+    /** Controls live conversion in the shared C# Meltype.Core QWERTY engine. */
+    var liveConversionEnabled: Boolean
+        get() = prefs.getBoolean(KEY_LIVE_CONVERSION_ENABLED, true)
+        set(value) { prefs.edit().putBoolean(KEY_LIVE_CONVERSION_ENABLED, value).apply() }
+
     /** 値が変わったときの通知を受ける。呼び出し側が listener を強い参照で持つこと（保存先は弱い参照しか持たない）。 */
     fun registerChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) =
         prefs.registerOnSharedPreferenceChangeListener(listener)
@@ -37,6 +56,10 @@ class Settings(context: Context) {
 
     companion object {
         const val KEY_JAPANESE_LAYOUT = "japanese_layout"
+        const val KEY_JAPANESE_SPACE_FULL_WIDTH = "japanese_space_full_width"
+        const val KEY_EMOJI_ENABLED = "emoji_enabled"
+        const val KEY_HAPTIC_ENABLED = "haptic_enabled"
+        const val KEY_LIVE_CONVERSION_ENABLED = "live_conversion_enabled"
         const val KEY_ENGLISH_LAYOUT = "english_layout"
 
         /** 保存してある値から、日本語の配列を決める。保存がない・知らない値のときは、最初の値（かな配列）。 */
@@ -51,7 +74,7 @@ class Settings(context: Context) {
             LayoutId.ROMAJI -> "romaji"
             LayoutId.QWERTY -> "qwerty"
             LayoutId.LATIN_FLICK -> "flick"
-            LayoutId.SYMBOLS -> ""
+            LayoutId.SYMBOLS, LayoutId.SYMBOLS2 -> ""
         }
 
         private const val KEY_TOGGLE_ENABLED = "toggle_enabled"

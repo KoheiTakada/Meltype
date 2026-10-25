@@ -49,7 +49,7 @@ class LayoutNavigator(japanese: LayoutId = LayoutId.KANA, english: LayoutId = La
 
     /** あa。日本語の配列と英語の配列を入れ替える。数字・記号の配列と絵文字の画面には、このキーがない。 */
     fun toggleLanguage() {
-        if (emojiOpen || current == LayoutId.SYMBOLS) return
+        if (emojiOpen || current == LayoutId.SYMBOLS || current == LayoutId.SYMBOLS2) return
         current = if (current.isJapanese) english else japanese
     }
 
@@ -59,14 +59,14 @@ class LayoutNavigator(japanese: LayoutId = LayoutId.KANA, english: LayoutId = La
             emojiOpen = false
             return
         }
-        if (target != LayoutId.SYMBOLS || current == LayoutId.SYMBOLS) return
-        backTarget = current
-        current = LayoutId.SYMBOLS
+        if (target != LayoutId.SYMBOLS && target != LayoutId.SYMBOLS2) return
+        if (current != LayoutId.SYMBOLS && current != LayoutId.SYMBOLS2) backTarget = current
+        current = target
     }
 
     /** 数字・記号の配列の戻るキー。 */
     fun back() {
-        if (emojiOpen || current != LayoutId.SYMBOLS) return
+        if (emojiOpen || (current != LayoutId.SYMBOLS && current != LayoutId.SYMBOLS2)) return
         current = backTarget
     }
 

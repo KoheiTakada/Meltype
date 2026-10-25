@@ -37,24 +37,23 @@ class ScreenCoordinator(private val nav: LayoutNavigator, private val screen: Sc
     }
 
     /** あa。 */
-    fun language() = switch { nav.toggleLanguage() }
+    fun language() = navigate { nav.toggleLanguage() }
 
     /** ?123、または絵文字の画面の戻るキー（[target] は開く前の配列）。 */
-    fun switchTo(target: LayoutId) = switch { nav.switchTo(target) }
+    fun switchTo(target: LayoutId) = navigate { nav.switchTo(target) }
 
     /** 数字・記号の配列の戻るキー。 */
-    fun back() = switch { nav.back() }
+    fun back() = navigate { nav.back() }
 
     /** 絵文字キー。確定してから、絵文字の画面を出す。出せなかったときは、開いたことにしない。 */
     fun openEmoji(pressedAtMs: Long) {
-        screen.commitComposing()
         if (screen.showEmojiPanel(pressedAtMs)) nav.openEmoji()
     }
 
-    private inline fun switch(move: () -> Unit) {
-        screen.commitComposing()
+    /** Page/mode navigation never commits: only punctuation and Enter do. */
+    private inline fun navigate(move: () -> Unit) {
         move()
-        screen.releaseShift()     // 配列が替わったら、⇧ は持ち越さない
+        screen.releaseShift()
         screen.showKeyboard()
     }
 }

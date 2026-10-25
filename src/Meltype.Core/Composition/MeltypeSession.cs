@@ -74,6 +74,10 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
         builder.Append(",\"predictions\":");
         AppendArray(builder, view.Predictions ?? []);
         builder.Append(",\"selectedPrediction\":").Append(view.SelectedPrediction);
+        builder.Append(",\"raw\":");
+        AppendString(builder, view.Raw ?? "");
+        builder.Append(",\"kana\":");
+        AppendString(builder, view.Kana ?? "");
         builder.Append("}}");
         return builder.ToString();
     }
@@ -215,8 +219,13 @@ public sealed class MeltypeSession
             MoreCandidates = moreCandidates,
             TranslationCandidates = () => settings.TranslationCandidates,
             TabConversion = () => settings.TabConversion,
-            ContinueAfterConversion = () => settings.ContinueAfterConversion,
+            ContinueAfterConversion = () => true,
             Learning = () => settings.LearningEnabled,
+            Predictor = new Predictor(
+                new PhraseHistory(Path.Combine(dataDirectory, "phrases.txt")),
+                new UserDictionary(Path.Combine(dataDirectory, "userdict.txt"), importDirectory: userDirectory),
+                new ConversionHistory(Path.Combine(dataDirectory, "conversions.json"))),
+            Predictions = () => true,
             SeparateKeyRoles = () => settings.SeparateKeyRoles,
             CandidateMeanings = () => settings.ShowCandidateMeanings,
             CorrectTypos = () => settings.CorrectTypos,
@@ -229,6 +238,9 @@ public sealed class MeltypeSession
     }
 
     /// <summary>英数 (直接入力) か。true の間はキーをすべてアプリに渡す (Mac の「英数」キー、「かな」キーで戻す)。</summary>
+    /// <summary>Update live conversion without replacing the entire IME session.</summary>
+    public void SetLiveConversion(bool enabled) => _settings().LiveConversion = enabled;
+
     public bool Direct
     {
         get => _direct;

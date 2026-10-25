@@ -19,6 +19,7 @@ import io.github.ninjin0802.keyboard.app.input.EnterKind
 import io.github.ninjin0802.keyboard.app.input.FlickDetector
 import io.github.ninjin0802.keyboard.app.input.KeyRepeater
 import io.github.ninjin0802.keyboard.app.input.ShiftState
+import io.github.ninjin0802.keyboard.app.input.SoftKeyTapAcceptance
 import io.github.ninjin0802.keyboard.app.input.SpaceCursorGesture
 import io.github.ninjin0802.keyboard.app.input.TouchTracker
 import io.github.ninjin0802.keyboard.app.layout.Key
@@ -26,12 +27,15 @@ import io.github.ninjin0802.keyboard.app.layout.KeyAction
 import io.github.ninjin0802.keyboard.app.layout.KeyboardLayout
 import io.github.ninjin0802.keyboard.app.layout.LayoutId
 import io.github.ninjin0802.keyboard.app.layout.Layouts
+import io.github.ninjin0802.keyboard.app.layout.FoldSplitLayout
 import io.github.ninjin0802.keyboard.app.layout.nearestKeyAt
 
 interface KeyListener {
     fun onKey(action: KeyAction, direction: Direction, timeMs: Long)
 
     /** 空白キーが長押しされた。カーソルを動かす状態に入ってよければ true（未確定文字があるあいだは false）。 */
+    fun onSpaceLanguageMenu(): Boolean = false
+
     fun onCursorModeStart(): Boolean
 
     /** カーソルを [steps] 文字動かす（右が正）。 */
@@ -43,8 +47,18 @@ interface KeyListener {
  * キーの絵の形は [KeyIcons]、フリックの案内は [FlickPopupView] が受け持つ。
  */
 class KeyboardView(context: Context) : View(context) {
-    var layout: KeyboardLayout = Layouts.kana
-        set(value) { field = value; cancelTouch(); updateCells(); rebuildFaces(); requestLayout(); invalidate() }
+    /** The mode selected by the IME is not overwritten by fold/unfold reflow. */
+    private var sourceLayout: KeyboardLayout = Layouts.kana
+    private var displayedLayout: KeyboardLayout = Layouts.kana
+    var layout: KeyboardLayout
+        get() = displayedLayout
+        set(value) {
+            sourceLayout = value
+            reflow(width)
+            cancelTouch()
+            requestLayout()
+            invalidate()
+        }
     var shift: ShiftState = ShiftState.OFF
         set(value) { field = value; rebuildFaces(); invalidate() }
 
@@ -60,14 +74,42 @@ class KeyboardView(context: Context) : View(context) {
     /** フリックの案内を描く View。この View と候補バーの両方に重なっている。 */
     var popup: FlickPopupView? = null
 
-    private val palette = Palette.of(context)
+    private var palette = Palette.of(context)
     private val density = resources.displayMetrics.density
 
-    /** 1段の高さ。画面の向きで変わるので、測るたびに今の向きから決める。 */
-    private val rowHeightPx: Float
-        get() = KeyboardHeights.rowDp(resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) * density
-    private val gap = 3 * density
-    private val radius = 10 * density
+    private fun displayHeightDp(): Float = maxOf(
+        resources.configuration.screenHeightDp.toFloat(),
+        resources.displayMetrics.heightPixels / density,
+    )
+    private var metrics = KeyboardHeights.forViewport(
+        resources.configuration.screenWidthDp.toFloat(), displayHeightDp(),
+    )
+    private val rowHeightPx: Float get() = metrics.rowDp * density
+    private val gapX: Float get() = metrics.gapXDp * density
+    private val gapY: Float get() = metrics.gapYDp * density
+    private val radius = 12 * density
+    private val outerSidePx: Float get() = metrics.sideDp * density
+    private val outerTopPx: Float get() = metrics.topDp * density
+    private val outerBottomPx: Float get() = metrics.bottomDp * density
+
+    /** Update layout and hit geometry from the same measured viewport. */
+    private fun reflow(widthPx: Int) {
+        val widthDp = if (widthPx > 0) widthPx / density
+                      else resources.configuration.screenWidthDp.toFloat()
+        val heightDp = displayHeightDp()
+        val nextMetrics = KeyboardHeights.forViewport(widthDp, heightDp)
+        val nextLayout = FoldSplitLayout.forWindow(
+            sourceLayout, widthDp, heightDp,
+            resources.configuration.smallestScreenWidthDp,
+        )
+        if (nextMetrics != metrics || nextLayout !== displayedLayout) {
+            metrics = nextMetrics
+            displayedLayout = nextLayout
+            updateCells()
+            rebuildFaces()
+            invalidate()
+        }
+    }
     private val handler = Handler(Looper.getMainLooper())
     private val repeater = KeyRepeater({ d, t -> handler.postDelayed(t, d) }, { handler.removeCallbacksAndMessages(null) })
 
@@ -89,6 +131,13 @@ class KeyboardView(context: Context) : View(context) {
     private var cellW = 1f
     private var cellH = 1f
 
+    var hapticEnabled: Boolean = true
+        set(value) {
+            field = value
+            // The setting is independent of the system's dark/light preference.
+            isHapticFeedbackEnabled = value
+        }
+    private var spaceMenuOpened = false
     private var pressed: Key? = null
     private var downX = 0f
     private var downY = 0f
@@ -100,8 +149,16 @@ class KeyboardView(context: Context) : View(context) {
         val k = pressed
         if (k == null || k.action != KeyAction.Space || !holds(k)) return@Runnable
         if (!cursorGesture.longPress(SystemClock.uptimeMillis())) return@Runnable
+        if (layout.id == LayoutId.ROMAJI || layout.id == LayoutId.QWERTY) {
+            if (listener?.onSpaceLanguageMenu() == true) {
+                spaceMenuOpened = true
+                KeyFeedback.play(this, hapticEnabled, KeyFeedback.Kind.LONG_PRESS)
+            }
+            cursorGesture.cancel()
+            return@Runnable
+        }
         if (listener?.onCursorModeStart() == true) {
-            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            KeyFeedback.play(this, hapticEnabled, KeyFeedback.Kind.LONG_PRESS)
         } else {
             cursorGesture.cancel()   // 未確定文字がある。離したときに、ふつうの空白キーとして働く。
         }
@@ -137,13 +194,16 @@ class KeyboardView(context: Context) : View(context) {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val availableWidth = MeasureSpec.getSize(widthMeasureSpec)
+        reflow(availableWidth)
         setMeasuredDimension(
-            MeasureSpec.getSize(widthMeasureSpec),
-            (rowHeightPx * layout.rows).toInt(),
+            availableWidth,
+            (rowHeightPx * layout.rows + outerTopPx + outerBottomPx).toInt(),
         )
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        reflow(w)
         updateCells()
         rebuildFaces()
     }
@@ -151,40 +211,55 @@ class KeyboardView(context: Context) : View(context) {
     /** 画面が回ったら、作り直されなくても、その向きの高さで測り直す。 */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        palette = Palette.of(context)
+        hapticEnabled = io.github.ninjin0802.keyboard.app.Settings(context).hapticEnabled
+        invalidate()
         cancelTouch()
+        layout = sourceLayout
         requestLayout()
     }
 
     /** 列数・行数が変わると、View の大きさが同じでもセルの大きさが変わる。 */
     private fun updateCells() {
         if (width <= 0 || height <= 0) return
-        cellW = width / layout.columns
-        cellH = height.toFloat() / layout.rows
+        cellW = (width - 2f * outerSidePx).coerceAtLeast(1f) / layout.columns
+        cellH = (height - outerTopPx - outerBottomPx).coerceAtLeast(1f) / layout.rows
     }
 
     override fun onDraw(canvas: Canvas) {
-        canvas.drawColor(palette.background)
+        // IME container owns the translucent background; do not paint an opaque slab.
         val keys = layout.keys
         for (i in keys.indices) {
             val k = keys[i]
             keyRect(k, rect)
             val isPressed = k === pressed
             val action = k.action
-            val isPill = action == KeyAction.Enter || action == KeyAction.Back || action == KeyAction.Language ||
-                (action is KeyAction.Switch && action.to != LayoutId.SYMBOLS)
-            val isChar = action is KeyAction.Flick || action is KeyAction.Text || action is KeyAction.Romaji
+            val isPill = action == KeyAction.Enter
+            val isChar = action is KeyAction.Flick || action is KeyAction.Text || action is KeyAction.Romaji || action == KeyAction.Space
             fill.color = when {
                 isPill -> if (isPressed) palette.pillPressed else palette.pill
                 isChar -> if (isPressed) palette.keyPressed else palette.key
                 else -> if (isPressed) palette.functionKeyPressed else palette.functionKey
             }
             // あa と確定キーは、両端を半円にする。
-            val r = if (isPill) rect.height() / 2 else radius
+            // Same 12dp corner geometry for Return and letter keys.
+            // Color—not a distinct capsule silhouette—marks the commit key.
+            val r = radius
             canvas.drawRoundRect(rect, r, r, fill)
 
             val foreground = if (isPill) palette.onPill else palette.text
             val stroke = strokes[i]
             val fillPath = fills[i]
+            if (action == KeyAction.Space && (layout.id == LayoutId.ROMAJI || layout.id == LayoutId.QWERTY || layout.id == LayoutId.SYMBOLS || layout.id == LayoutId.SYMBOLS2)) {
+                if (layout.id == LayoutId.ROMAJI) {
+                    textPaint.color = palette.subText
+                    textPaint.textAlign = Paint.Align.RIGHT
+                    textPaint.textSize = 11f * density
+                    canvas.drawText("あ", rect.right - 10f * density, rect.bottom - 7f * density, textPaint)
+                    textPaint.textAlign = Paint.Align.CENTER
+                }
+                continue
+            }
             if (stroke != null && fillPath != null) {
                 iconStroke.color = foreground
                 iconFill.color = foreground
@@ -196,7 +271,7 @@ class KeyboardView(context: Context) : View(context) {
                 textPaint.textSize = density * when {
                     label.length > 1 -> if (rect.width() < NARROW_KEY_DP * density) 12.5f else 15f
                     action is KeyAction.Flick -> KANA_TEXT_DP
-                    else -> 20f
+                    else -> 23f
                 }
                 textPaint.getFontMetrics(fm)
                 canvas.drawText(label, rect.centerX(), rect.centerY() - (fm.ascent + fm.descent) / 2, textPaint)
@@ -206,12 +281,23 @@ class KeyboardView(context: Context) : View(context) {
 
     private fun keyRect(k: Key, out: RectF) {
         out.set(
-            k.col * cellW + gap / 2, k.row * cellH + gap / 2,
-            (k.col + k.width) * cellW - gap / 2, (k.row + k.rowSpan) * cellH - gap / 2,
+            outerSidePx + k.col * cellW + gapX / 2,
+            outerTopPx + k.row * cellH + gapY / 2,
+            outerSidePx + (k.col + k.width) * cellW - gapX / 2,
+            outerTopPx + (k.row + k.rowSpan) * cellH - gapY / 2,
         )
     }
 
-    private fun keyAtPoint(x: Float, y: Float): Key? = layout.nearestKeyAt(x / cellW, y / cellH)
+    private fun keyAtPoint(x: Float, y: Float): Key? {
+        val unitX = (x - outerSidePx) / cellW
+        val unitY = (y - outerTopPx) / cellH
+        if (x < outerSidePx || x >= width - outerSidePx ||
+            y < outerTopPx || y >= height - outerBottomPx) return null
+        if ((layout.id == LayoutId.ROMAJI || layout.id == LayoutId.QWERTY) &&
+            displayedLayout !== sourceLayout &&
+            FoldSplitLayout.isDeadZone(unitX, layout.columns)) return null
+        return layout.nearestKeyAt(unitX, unitY)
+    }
 
     private fun fire(action: KeyAction, direction: Direction, time: Long) {
         listener?.onKey(action, direction, time)
@@ -259,7 +345,7 @@ class KeyboardView(context: Context) : View(context) {
         pressed = k
         if (k == null) return false
         downX = x; downY = y
-        performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+        KeyFeedback.play(this, hapticEnabled, KeyFeedback.Kind.TAP)
         val action = k.action
         when {
             action.repeats -> repeater.start({ holds(k) }) { fire(action, Direction.TAP, SystemClock.uptimeMillis()) }
@@ -309,8 +395,18 @@ class KeyboardView(context: Context) : View(context) {
                 action is KeyAction.Flick ->
                     fire(action, FlickDetector.direction(x - downX, y - downY, cellW * k.width), time)
                 // カーソルを動かしたあとは、空白を入れない。
+                action == KeyAction.Space && spaceMenuOpened -> Unit
                 action == KeyAction.Space && cursorGesture.end() -> Unit
-                keyAtPoint(x, y) === k -> fire(action, Direction.TAP, time)
+                SoftKeyTapAcceptance.shouldCommit(
+                    sameKey = keyAtPoint(x, y) === k,
+                    textKey = action is KeyAction.Romaji || action is KeyAction.Text || action == KeyAction.Space,
+                    downX = downX,
+                    downY = downY,
+                    upX = x,
+                    upY = y,
+                    keyWidthPx = cellW * k.width,
+                    rowHeightPx = cellH * k.rowSpan,
+                ) -> fire(action, Direction.TAP, time)
             }
         }
         releaseTouch()
@@ -323,6 +419,7 @@ class KeyboardView(context: Context) : View(context) {
         repeater.stop()
         removeCallbacks(longPress)
         cursorGesture.cancel()
+        spaceMenuOpened = false
         popup?.hide()
         if (pressed != null) { pressed = null; invalidate() }
     }
@@ -336,6 +433,13 @@ class KeyboardView(context: Context) : View(context) {
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
         if (visibility != VISIBLE) cancelTouch()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        hapticEnabled = io.github.ninjin0802.keyboard.app.Settings(context).hapticEnabled
+        palette = Palette.of(context)
+        invalidate()
     }
 
     override fun onDetachedFromWindow() {

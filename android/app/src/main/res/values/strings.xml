@@ -2,13 +2,6 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <resources>
     <string name="app_name">Meltype</string>
-    <string name="step_enable_title">手順1　キーボードを有効にする</string>
-    <string name="step_enable_button">設定を開く</string>
-    <string name="step_select_title">手順2　キーボードを選ぶ</string>
-    <string name="step_select_button">キーボードを選ぶ</string>
-    <string name="step_done">済み</string>
-    <string name="try_title">試し書き</string>
-    <string name="try_hint">ここに入力してみてください</string>
     <string name="settings_title">設定</string>
     <string name="toggle_input">トグル入力</string>
     <string name="toggle_wait">トグル入力の待ち時間</string>
@@ -18,6 +11,10 @@
     <string name="english_input">英字の入力</string>
     <string name="english_input_qwerty">QWERTY</string>
     <string name="english_input_flick">12キー（フリック）</string>
+    <string name="japanese_space_setting">日本語入力中のスペース</string>
+    <string name="japanese_space_fullwidth">全角スペース</string>
+    <string name="japanese_space_halfwidth">半角スペース</string>
+    <string name="emoji_enabled_setting">絵文字を使う</string>
     <string name="licenses_link">ライセンス</string>
     <string name="licenses_loading">読み込み中…</string>
 </resources>

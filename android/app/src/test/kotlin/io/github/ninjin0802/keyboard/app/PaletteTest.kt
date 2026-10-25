@@ -67,12 +67,23 @@ class PaletteTest {
         }
     }
 
-    @Test fun function_keys_are_tinted_differently_from_character_keys() {
+    @Test fun every_keycap_remains_white_in_light_and_dark_modes() {
         for ((name, p) in listOf("light" to Palette.light, "dark" to Palette.dark)) {
-            assertDistinct("$name", p.key, p.functionKey); assertDistinct("$name pill / key", p.pill, p.key)
-            assertDistinct("$name pill / functionKey", p.pill, p.functionKey)
+            kotlin.test.assertEquals(0xFFFFFFFF.toInt(), p.key, "$name character")
+            kotlin.test.assertEquals(p.key, p.functionKey, "$name function")
+            kotlin.test.assertEquals(0xFF0069D9.toInt(), p.pill, "$name distinct blue return")
+            kotlin.test.assertEquals(0xFFFFFFFF.toInt(), p.onPill, "$name white return label")
+            kotlin.test.assertEquals(p.keyPressed, p.functionKeyPressed, "$name pressed")
+            kotlin.test.assertTrue(p.pill != p.key, "$name return must differ only in color")
+            val r = p.background shr 16 and 0xFF
+            val g = p.background shr 8 and 0xFF
+            val b = p.background and 0xFF
+            kotlin.test.assertEquals(r, g, "$name neutral background")
+            kotlin.test.assertEquals(g, b, "$name neutral background")
         }
+        kotlin.test.assertEquals(Palette.light.key, Palette.dark.key)
     }
+
 
     /** 見分けがつく: 明るさの比が 1.12 以上あるか、色みがはっきり違う。 */
     private fun assertDistinct(name: String, a: Int, b: Int) {
