@@ -160,12 +160,27 @@ class MainActivity : Activity() {
     @Deprecated("Android 13+ uses the registered platform callback")
     override fun onBackPressed() = navigateBack()
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_BACK && page != Page.HOME) {
-            navigateBack()
-            return true
+    // Handle a hardware/adb Back key as one complete DOWN+UP interaction.
+    // Navigating on DOWN makes an unmatched UP escape to Android's predictive
+    // back dispatcher, which can close Settings immediately after returning
+    // to HOME. Back gestures still use the OnBackInvokedCallback above.
+    private var backKeyCaptured = false
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            when (event.action) {
+                KeyEvent.ACTION_DOWN -> if (page != Page.HOME || backKeyCaptured) {
+                    backKeyCaptured = true
+                    return true
+                }
+                KeyEvent.ACTION_UP -> if (backKeyCaptured) {
+                    backKeyCaptured = false
+                    if (!event.isCanceled) navigateBack()
+                    return true
+                }
+            }
         }
-        return super.onKeyDown(keyCode, event)
+        return super.dispatchKeyEvent(event)
     }
     private fun navigate(next: Page) { page = next; render() }
     private fun background(color: Int) = GradientDrawable().apply {
