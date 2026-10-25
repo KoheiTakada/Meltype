@@ -84,10 +84,13 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
         // The Android adapter needs raw Latin keystrokes and the kana
         // interpretation to offer explicit corrections without losing
         // the upstream's separate committed/preedit distinction.
-        builder.Append(",\"raw\":");
-        AppendString(builder, view.Raw ?? "");
-        builder.Append(",\"kana\":");
-        AppendString(builder, view.Kana ?? "");
+        if (OperatingSystem.IsAndroid())
+        {
+            builder.Append(",\"raw\":");
+            AppendString(builder, view.Raw ?? "");
+            builder.Append(",\"kana\":");
+            AppendString(builder, view.Kana ?? "");
+        }
         // 打ったキー (設定「打ったキーを表示」が OFF なら null)
         builder.Append(",\"typed\":");
         if (view.Typed is { } typed) AppendString(builder, typed);
