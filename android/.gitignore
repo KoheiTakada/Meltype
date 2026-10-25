@@ -7,4 +7,4 @@ local.properties
 mozc/src/main/jniLibs/
 mozc/src/main/assets/mozc.data
 mozc/src/main/assets/MOZC_NOTICES.txt
-\napp/prebuilt/\n
+app/prebuilt/

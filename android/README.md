@@ -24,6 +24,8 @@ Android用の仮想キーボード（IME）。日本語QWERTYでは **日英自�
 | ユーザー辞書編集、音声入力、カスタムテーマ | 未対応 |
 | 全端末・全アプリでの互換性、TalkBack対応 | 未検証／保証なし |
 
+**再現可能なQA手順（入力・期待値・18件のテストコード・実機チェックリスト）：[docs/QA-TESTING.md](docs/QA-TESTING.md)**。CI定義は [android-qa.yml](../.github/workflows/android-qa.yml)。
+
 詳しくは [08 日英自動判別](docs/spec/08-auto-detection.html)、[03 構成](docs/spec/03-architecture.html)、[11 テスト](docs/spec/11-testing.html)。これらのHTML仕様書を規範とし、`docs/markdown/spec/` に対応するレビュー用Markdownを置きます。
 
 ## プライバシーと制約
@@ -36,7 +38,7 @@ Android用の仮想キーボード（IME）。日本語QWERTYでは **日英自�
 ## 対応環境と検証
 
 - 最低Android 8.0（API 26）、Android用ABIは `arm64-v8a`・`x86_64`。
-- **Android 15（API 35）エミュレーターのInstrumentationテスト18件すべて成功**。日英入力、候補バー、設定、システムBack、システムバー余白を確認。
+- **旧検証済みコミット7a44ba5** ではAndroid 15（API 35）のInstrumentationテスト18/18件成功。現在のPR統合コミットは**別途再検証を要する**。テスト定義と再現手順は [QA-TESTING.md](docs/QA-TESTING.md) に固定。
 - **Pixel 10 Pro Fold／Android 17** で2026-10-25に実機確認完了。縦横回転・展開時の配列とキー操作を含む。
 - 検証済みソース: [QAコミット 7a44ba5](https://github.com/KoheiTakada/Meltypetest/commit/7a44ba535f8864ef805f20b117f8074bcde87a79)。[ビルド・テスト結果](https://github.com/KoheiTakada/Meltypetest/actions/runs/40163689812)。
 - [2026-10-25の検証記録](docs/verification/2026-10-25-bilingual.html) が現行の日英自動判別と実機確認の証跡です。`docs/verification/2026-10-13-stage1.html` は**当時の第1段階のみの履歴記録**であり、最新QAの結果ではありません。
