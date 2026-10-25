@@ -68,6 +68,15 @@ A04〜A06などには固定JSONで候補表示ロジックを検証するケー�
 | M07 | 変換訂正 | nihongo→英字訂正→Space/Enter | 重複・欠落なく確定 |
 | M08 | 設定 | 保存と戻る操作 | 設定保存、ステータスバー非重複 |
 
+## 2026-10-25の統合版実機確認記録
+
+- **テスト対象APK**: PR #1149 のコミット `965dbf33bb20300a2c906168cfbf980d930f64ad` に対応するQAデバッグAPK（[Actions #40182600362](https://github.com/KoheiTakada/Meltypetest/actions/runs/40182600362)）。
+- **端末**: Pixel 10 Pro Fold、Android 17。
+- **実機テスト状態**: 2026-10-25、ユーザー本人から「実機確認完了」の報告を受領。最新版に対する再確認として記録する。端末上の操作自体はCIの自動実行ではない。
+- **証拠の限界**: M01〜M08各項目の個別成否、実際の文字列、画面寸法、スクリーンショットは受領していない。そのため、個別テストの実測値や8件それぞれのPASSを捏造せず、**総括の完了報告**として記録する。
+- **自動テスト**: API35の計測 **18/18 PASS**、JVM **444/444 PASS**。これはユーザー報告とは独立したCI確認（[実行ログ](https://github.com/KoheiTakada/Meltypetest/actions/runs/40182600362)）。
+- **ソースからの再構築**: [ForkのAndroid QA #40182575249](https://github.com/KoheiTakada/Meltype/actions/runs/40182575249)で成功。公開用署名・他機種互換性の検証とは区別する。
+
 ## 4. CI / 証跡
 Actionsはビルド時のSHAとGradle単体テストJUnit XML、Android計測テストのケース別JUnit XML・ログ・端末条件をArtifactとJob Summaryで公開する。失敗時もArtifactを保存する。再検証の際は同じブランチ・コミットをcheckoutしてコマンドを再実行する。
 

@@ -38,9 +38,9 @@ Android用の仮想キーボード（IME）。日本語QWERTYでは **日英自�
 ## 対応環境と検証
 
 - 最低Android 8.0（API 26）、Android用ABIは `arm64-v8a`・`x86_64`。
-- **旧検証済みコミット7a44ba5** ではAndroid 15（API 35）のInstrumentationテスト18/18件成功。現在のPR統合コミットは**別途再検証を要する**。テスト定義と再現手順は [QA-TESTING.md](docs/QA-TESTING.md) に固定。
-- **Pixel 10 Pro Fold／Android 17** で2026-10-25に実機確認完了。縦横回転・展開時の配列とキー操作を含む。
-- 検証済みソース: [QAコミット 7a44ba5](https://github.com/KoheiTakada/Meltypetest/commit/7a44ba535f8864ef805f20b117f8074bcde87a79)。[ビルド・テスト結果](https://github.com/KoheiTakada/Meltypetest/actions/runs/40163689812)。
+- **本家向け統合コミット `965dbf3`** で Android 15（API 35）のInstrumentation **18/18件合格**、JVM単体 **444/444件合格**。[CI結果・各テストのJUnit XMLとログ](https://github.com/KoheiTakada/Meltypetest/actions/runs/40182600362)。Mozcを固定ソースから再ビルドする[独立したAndroid CI](https://github.com/KoheiTakada/Meltype/actions/runs/40182575249)も成功。テスト定義と再現手順は [QA-TESTING.md](docs/QA-TESTING.md) に固定。
+- **Pixel 10 Pro Fold／Android 17** で2026-10-25に**統合版APK（ソース `965dbf3`）の実機確認完了との本人報告**。手動QA M01〜M08の個別ログ・実測値やスクリーンショットは未収集。再現する場合は[手動テスト手順](docs/QA-TESTING.md)を使用。
+- 旧開発ソース `7a44ba5` の[過去のQA](https://github.com/KoheiTakada/Meltypetest/actions/runs/40163689812)は参考履歴。最新統合版の合否は上記 `965dbf3` のCIと実機確認に基づく。
 - [2026-10-25の検証記録](docs/verification/2026-10-25-bilingual.html) が現行の日英自動判別と実機確認の証跡です。`docs/verification/2026-10-13-stage1.html` は**当時の第1段階のみの履歴記録**であり、最新QAの結果ではありません。
 
 ## ビルド
