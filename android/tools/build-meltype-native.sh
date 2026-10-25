@@ -31,7 +31,7 @@ for spec in "arm64-v8a:linux-bionic-arm64:aarch64-linux-android" "x86_64:linux-b
     -c Release -r "$RID" \
     -p:PublishAot=true -p:NativeLib=Shared \
     -p:DisableUnsupportedError=true -p:PublishAotUsingRuntimePack=true \
-    -p:AndroidApiLevelMin=26
+    -p:AndroidApiLevelMin=26 -p:MeltypeAndroidNative=true
   OUTPUT_DIR="$ROOT/src/Meltype.Mac.Native/bin/Release/net10.0/$RID/publish"
 ls -lah "$OUTPUT_DIR"
 SOURCE="$(find "$OUTPUT_DIR" -maxdepth 1 -type f -name "*.so" -print -quit)"

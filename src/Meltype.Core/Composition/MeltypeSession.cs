@@ -8,6 +8,17 @@ using Meltype.Input;
 
 namespace Meltype.Composition;
 
+// Compiled only for the Android NativeAOT publication, never for Mac/Linux
+// desktop or Windows Core. The Android build script passes the MSBuild flag.
+internal static class AndroidNativeRuntime
+{
+#if MELTYPE_ANDROID_NATIVE
+    internal const bool Enabled = true;
+#else
+    internal const bool Enabled = false;
+#endif
+}
+
 /// <summary>
 /// 入力欄への書き込み 1 回分。DeleteBefore 文字をキャレットの前から消してから Text を入れる (確定し直すとき以外は 0)。
 /// Expect は消す文字 (このセッションで確定した文字。分からなければ null)。
@@ -84,7 +95,7 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
         // The Android adapter needs raw Latin keystrokes and the kana
         // interpretation to offer explicit corrections without losing
         // the upstream's separate committed/preedit distinction.
-        if (OperatingSystem.IsAndroid())
+        if (AndroidNativeRuntime.Enabled)
         {
             builder.Append(",\"raw\":");
             AppendString(builder, view.Raw ?? "");
@@ -241,14 +252,14 @@ public sealed class MeltypeSession
             MoreCandidates = moreCandidates,
             TranslationCandidates = () => settings.TranslationCandidates,
             TabConversion = () => settings.TabConversion,
-            ContinueAfterConversion = () => OperatingSystem.IsAndroid() || settings.ContinueAfterConversion,
+            ContinueAfterConversion = () => AndroidNativeRuntime.Enabled || settings.ContinueAfterConversion,
             // Keep Android's tested prediction candidates without changing
             // the existing desktop prediction preferences or shared Core.
-            Predictor = OperatingSystem.IsAndroid() ? new Predictor(
+            Predictor = AndroidNativeRuntime.Enabled ? new Predictor(
                 new PhraseHistory(Path.Combine(dataDirectory, "phrases.txt")),
                 new UserDictionary(Path.Combine(dataDirectory, "userdict.txt"), importDirectory: userDirectory),
                 new ConversionHistory(Path.Combine(dataDirectory, "conversions.json"))) : shared.Options.Predictor,
-            Predictions = OperatingSystem.IsAndroid() ? () => true : shared.Options.Predictions,
+            Predictions = AndroidNativeRuntime.Enabled ? () => true : shared.Options.Predictions,
             Learning = () => settings.LearningEnabled,
             SeparateKeyRoles = () => settings.SeparateKeyRoles,
             EnglishFirstInput = () => settings.EnglishFirstInput,
