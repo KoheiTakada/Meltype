@@ -5,8 +5,9 @@ package io.github.ninjin0802.keyboard.app.core
 import java.io.File
 
 /**
- * NativeAOT proof of concept. This intentionally does not replace InputSession or
- * connect to InputConnection yet. Use on a single IME thread; the Core session
+ * Production-path NativeAOT/JNI bridge for Japanese QWERTY bilingual detection.
+ * KeyboardService and CoreInputAdapter connect its results to InputConnection.
+ * Use on a single IME thread; the Core session
  * is not documented as thread-safe.
  *
  * All text crosses JNI as UTF-8 byte arrays rather than Java Modified UTF-8.

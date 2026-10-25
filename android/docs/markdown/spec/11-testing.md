@@ -120,4 +120,4 @@ PC の上で動かす。画面や入力欄に触らない判断だけを対象�
 
 ## 段階2と段階3のテスト
 
-それぞれの章（[07](07-kana-to-english.md)、[08](08-auto-detection.md)）を「確定」に上げるときに、この章に節を足す。段階3は、本家のテストを Kotlin に写したものを中心にする。
+日本語QWERTYの自動判別は**実装済み**で、Kotlin再実装ではなくC# CoreのJNI統合を検証する。2026-10-25のAndroid 15エミュレーターではInstrumentation **18件中18件合格**（日英入力・候補・設定・戻る・システムバー）。Pixel 10 Pro Fold（Android 17）で実機確認完了。[CI](https://github.com/KoheiTakada/Meltypetest/actions/runs/40163689812)。読みから英字の独立機能（[07](07-kana-to-english.md)）は未対応。

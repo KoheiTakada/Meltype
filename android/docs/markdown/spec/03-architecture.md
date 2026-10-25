@@ -1,61 +1,45 @@
-<!-- Automatically converted from spec/03-architecture.html. Check upstream edits before submitting. -->
+# 03 構成（Android日英自動判別統合版）
 
-# 03 構成
-
-確定
+**状態：実装済み（2026-10-25）**
 
 ## 対応環境
 
 | 項目 | 値 |
 | --- | --- |
-| 対応 OS | Android 8.0（API 26）以降 |
-| CPU | arm64-v8a（実機）、x86\_64（エミュレーター） |
-| 言語 | Kotlin。Mozc の部分だけ C++（既製のものをビルドして使う） |
-| ビルド | Gradle（Kotlin DSL） |
-| リポジトリ | GitHub の個人アカウント `ninjin0802` の下に置く |
-| アプリの表示名 | Meltype |
-| アプリ ID | `io.github.ninjin0802.keyboard`（公開前に変えてよい。変えると別アプリ扱いになり学習データは引き継がれない） |
+| 対応OS | Android 8.0（API 26）以降 |
+| 対応ABI | arm64-v8a（実機）、x86_64（エミュレーター） |
+| UI・配列・フリック | Kotlin、Android View、Gradle |
+| 日英自動判別・未確定文字 | 共有C# `src/Meltype.Core/` をAndroid NativeAOTでビルド |
+| ネイティブ連携 | Android NDK / JNI（`libMeltypeNative.so`） |
+| かな漢字変換 | 端末内のOSS版Mozc |
+| アプリID・正式署名 | 本家メンテナーの判断待ち |
 
-## モジュール
+## 処理の分岐
 
-3つに分ける。
-
-| モジュール | 役割 | Android への依存 |
-| --- | --- | --- |
-| `app` | キーボード本体。配列の描画、タッチとフリックの判定、候補バー、入力欄とのやり取り、導入画面 | あり |
-| `engine` | 入力の頭脳。未確定文字の管理、かなの組み立て、ライブ変換の制御。段階2で読み→英字、段階3で日英判別が加わる | なし（純粋な Kotlin） |
-| `mozc` | Mozc を呼び出す層。変換エンジンの本体（`libmozc.so`）と辞書（`mozc.data`）を同梱する | あり |
-
-### 依存の向き
-
-```
-app ──→ engine
- │         ↑
- └──→ mozc ┘   （mozc は engine が定める変換の窓口を実装する）
+```text
+KeyboardService (Kotlin IME)
+  ├─ 日本語QWERTY → MeltypeCoreSession → JNI → C# Meltype.Core (NativeAOT)
+  │                                      └→ Mozcの変換コールバック
+  ├─ かな／英字フリック → Kotlin engine → Mozc (必要時)
+  └─ 英字・数字／記号の直接入力
+       ↓
+Android InputConnection / CandidateBarView
 ```
 
-- `engine` は他のどのモジュールにも依存しない。変換は `Converter` という窓口（[06](06-conversion-mozc.md)）越しに頼む。
-- `mozc` はその窓口を実装する。`engine` は相手が Mozc であることを知らない。
-- `app` が両者をつなぐ。
+日本語QWERTYでは **C#判別エンジンをKotlinへ移植しない**。既存の`Meltype.Core`をAndroid用にビルドし、入力・候補をJNI経由で受け渡す。共有Coreが使えない場合には従来のKotlin処理にフォールバックしてIMEの入力を継続する。
 
-こう分ける理由は、`engine` を PC 上の単体テストだけで確かめられるようにするため。テストでは `Converter` を偽物に差し替える。
+変換・予測の候補と元インデックスは`CoreCandidateChoices`で保持し、`CoreInputAdapter`が`InputConnection`へ未確定文字と確定文字を反映する。12キーフリックは既存のKotlin`InputSession`を使用する。
 
-## 処理の流れ
+## モジュール・ディレクトリ
 
-1. 利用者がキーを押す。`app` がタッチ位置とフリック方向から、どの操作かを決める（例: 「か」を入力、「削除」）。
-2. `app` がその操作を `engine` の入力セッションに渡す。
-3. `engine` が読みを更新し、必要なら `Converter` に変換を頼む。
-4. `engine` が結果を「表示の指示」として返す。中身は、未確定文字として出す文字列、確定して書き込む文字列、候補バーに並べる候補。
-5. `app` がその指示どおりに、入力欄と候補バーを更新する。
+| パス | 役割 |
+| --- | --- |
+| `android/app/` | IME、候補・設定画面、Kotlinアダプター、C JNI |
+| `android/engine/` | 従来のKotlinエンジン |
+| `android/mozc/` | JNIとローカル辞書 |
+| `src/Meltype.Core/` | 共有日英判別・未確定文字・変換制御 |
+| `android/tools/build-meltype-native.sh` | CoreのAndroid NativeAOTビルド |
 
-`engine` は入力欄に直接触れない。入力欄への書き込みは `app` だけが行う。
+## セキュリティ・テスト
 
-## スレッド
-
-- キーの描画とタッチの処理は、画面のスレッドで行う。
-- 変換は時間がかかることがあるので、専用のスレッド1本で順番に行う。
-- 変換の結果が返ったとき、その間に読みが変わっていたら、その結果は捨てる。入力欄が切り替わっていた場合も捨てる。
-
-## キーボード画面の作り方
-
-Jetpack Compose は使わず、独自の View で描く。キーボードは押してからの反応の速さが最も大事で、独自 View のほうが軽く、IME での実績も多い。導入画面も同じ理由で通常の View で作り、依存を増やさない。
+IMEはネットワーク権限を要求せず、入力内容を外部送信しない。パスワード等の変換を禁止する入力欄では共有Coreを使用しない。Android 15のInstrumentation 18/18件合格、Pixel 10 Pro Fold（Android 17）実機確認完了。[仕様08](08-auto-detection.md)・[テスト11](11-testing.md)も参照。

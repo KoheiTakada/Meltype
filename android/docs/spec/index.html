@@ -30,7 +30,7 @@
 <p>このディレクトリが、このキーボードアプリの仕様の唯一の正（SSOT）です。</p>
 <h2 id="運用ルール">運用ルール</h2>
 <ul>
-<li>仕様書は必ず HTML で書く。章ごとに1ファイルに分け、見た目は <code>style.css</code> にまとめる。Markdown など別の形式の写しを作らない。</li>
+<li>このディレクトリのHTMLを正本とし、章ごとに管理する。<code>../markdown/spec/</code> にはレビューしやすいMarkdown版を併置し、機能変更時に両方更新する。</li>
 <li>章を足す・名前を変えるときは、全ファイルの左の目次と、下の「章の一覧」を揃えて直す。</li>
 <li>仕様を変えるときは、先にここを直してからコードを直す。コードと食い違ったら、仕様書が正しいものとして扱い、どちらかを直して揃える。</li>
 <li>1つの事柄は1か所にだけ書く。他の章から触れるときは、内容を写さずリンクする。</li>
@@ -87,8 +87,8 @@
 </tr>
 <tr>
 <td><a href="08-auto-detection.html">08 日英自動判別</a></td>
-<td>段階3: QWERTY ローマ字入力での Meltype 式判別</td>
-<td><span class="badge draft">概要</span></td>
+<td>実装済み: C# Coreを共有した日本語QWERTYの日英自動判別</td>
+<td><span class="badge fixed">実装済み</span></td>
 </tr>
 <tr>
 <td><a href="09-privacy-security.html">09 プライバシーと安全</a></td>

@@ -1,95 +1,69 @@
-# Meltype for Android（試作版）
+# Meltype for Android — 日英自動判別対応の試作版
 
-Android の仮想キーボード（IME）です。Kotlin で書いた独立した Gradle プロジェクトで、Windows 版・Mac 版・Linux 版のコードには手を入れていません。
+Android用の仮想キーボード（IME）。日本語QWERTYでは **日英自動判別が実装済み**。既存のC# `Meltype.Core` を **NativeAOT + JNI** で共有し、Kotlinで判別ロジックを再実装していません。12キーのかな／英字フリック入力は既存のKotlinエンジンを継続使用します。
 
-> **試作版です。** Meltype の中心の機能である「日本語か英語かの自動判別」は、**ローマ字配列では導入済みです**。いま入っているのは、その土台になる日本語キーボード（フリック入力、ローマ字入力、ライブ変換）です。ローマ字配列の自動判別には既存C#のMeltype.CoreをNativeAOT/JNI経由で共有します（[仕様 08](docs/spec/08-auto-detection.html)）。
+このブランチは、[本家のAndroid版Draft PR #621](https://github.com/yksr-melt/Meltype/pull/621) の開発元 `ninjin0802/Meltype:android` に対する機能追加です。正式リリースではなく、実機検証済みの開発・QA版です。
 
-## できること
+## 実装済みの主な機能
 
-- **12キーのフリック入力**: かなを打つと、変換キーを押さなくても打つそばから漢字になる（ライブ変換）。変換は端末の中の OSS 版 Mozc で行う
-- **QWERTY のローマ字入力**: `kyouha` → `きょうは` → `今日は`。設定で、日本語を 12キーで打つか QWERTY で打つかを選べる
-- **英字**: QWERTY と、12キーのフリック（`abc` `def` …）を設定で選べる
-- **絵文字の画面**: 種類ごとの一覧、最近使ったもの
-- 候補バー、空白キーでの候補選び、トグル入力（設定でオン・オフと待ち時間）、空白キーの長押しでカーソル移動、数字・記号の配列
-- ライト/ダーク、横画面、ジェスチャーナビゲーション
+- **日英自動判別（日本語QWERTY）**: キーを手動で切り替えずに日本語・英語・混在テキストを入力。判別と未確定文字の処理はC# Coreを共有。判定ミスを英字・かな・カタカナの訂正候補で修正可能。
+- **ライブ変換・候補バー**: かな漢字変換はローカルのOSS版Mozcを使用。通常の変換候補、予測候補、訂正候補を表示・選択。
+- **入力配列**: 日本語QWERTY、かな12キーフリック、英字QWERTY、英字12キーフリック、2ページの数字・記号配列。日本語QWERTYに `、` `。` の専用キーを残し、`!` `?` も入力可能。
+- **配列切り替え**: QWERTYではスペース長押しで言語を選択。12キーの入力方式は引き続き独立。
+- **画面適応**: 画面の論理幅・高さ・アスペクト比でキー寸法と分割配列を決定。中央テンキーは幅と高さに十分な余裕がある画面だけ表示。縦横回転と折りたたみ端末に対応。
+- **操作・設定**: 触覚フィードバック、絵文字パネル、候補の選択、全角・半角スペース、ライブ変換のオン／オフ。設定画面はシステムバー余白と戻る操作に対応。
 
-## まだできないこと
+## 対応範囲と未対応機能
 
-- ローマ字配列以外の日英自動判別
-- 読みから英字を出す変換（`ぐーぐる` → `Google`。[仕様 07](docs/spec/07-kana-to-english.html)）
-- ユーザー辞書の編集、テーマの変更、音声入力
-- TalkBack での操作（キーに名前は持たせてあるが、読み上げにはまだ渡していない）
-- 予測候補は、Mozc を既定の設定で呼んでいるため少ない
+| 対象 | 状態 |
+| --- | --- |
+| 日本語QWERTYでの日英自動判別 | **実装済み**。C# `Meltype.Core` を使用 |
+| かな／英字12キーフリック | 実装済み。Kotlinの既存エンジンを使用 |
+| フリック配列での日英自動判別 | 未対応（今回の対象外） |
+| 読みから英単語を直接推薦する独立機能（`ぐーぐる` → `Google` 等） | 未対応。QWERTYの日英自動判別とは別機能 |
+| ユーザー辞書編集、音声入力、カスタムテーマ | 未対応 |
+| 全端末・全アプリでの互換性、TalkBack対応 | 未検証／保証なし |
 
-## プライバシー
+詳しくは [08 日英自動判別](docs/spec/08-auto-detection.html)、[03 構成](docs/spec/03-architecture.html)、[11 テスト](docs/spec/11-testing.html)。これらのHTML仕様書を規範とし、`docs/markdown/spec/` に対応するレビュー用Markdownを置きます。
 
-- 権限を1つも要求しない。インターネットの権限もないので、打った内容は端末の外に出ない
-- パスワードの欄では、変換も学習もしない。打った文字を未確定のまま持たない
-- 学習データと絵文字の履歴は、アプリ専用の領域にだけ置く。クラウドへのバックアップと、端末から端末への引き継ぎの対象から外してある
-- 打った文字、読み、候補を、ログに出さない
+## プライバシーと制約
 
-くわしくは [仕様 09](docs/spec/09-privacy-security.html)。
+- ネットワーク権限なし。端末の入力内容を送信する機能なし。
+- パスワード欄など、変換・学習を抑止すべき入力欄では、日英自動判別Coreを使用しない。
+- 学習データはアプリ専用の領域で扱い、通常のログに入力内容を含めない。
+- 触覚フィードバック用に `VIBRATE` 権限を要求する（「権限が一つもない」わけではない）。
 
-## 動く環境
+## 対応環境と検証
 
-- Android 8.0（API 26）以降
-- arm64-v8a（実機）、x86_64（エミュレーター）
-
-確かめた端末は、Pixel 9a（arm64）と、エミュレーター（API 35 と API 26、x86_64）です。最初の段階（フリックとライブ変換）について、確かめた内容と確かめられていない内容を [docs/verification/](docs/verification/2026-10-13-stage1.html) に書いてあります。そのあとに足した機能（Gboard 風の配列、絵文字の画面、配列の選択とローマ字入力）は、単体テストと、エミュレーターでの操作で確かめています。API 28〜34 の端末では確かめていません。
+- 最低Android 8.0（API 26）、Android用ABIは `arm64-v8a`・`x86_64`。
+- **Android 15（API 35）エミュレーターのInstrumentationテスト18件すべて成功**。日英入力、候補バー、設定、システムBack、システムバー余白を確認。
+- **Pixel 10 Pro Fold／Android 17** で2026-10-25に実機確認完了。縦横回転・展開時の配列とキー操作を含む。
+- 検証済みソース: [QAコミット 7a44ba5](https://github.com/KoheiTakada/Meltypetest/commit/7a44ba535f8864ef805f20b117f8074bcde87a79)。[ビルド・テスト結果](https://github.com/KoheiTakada/Meltypetest/actions/runs/40163689812)。
+- [2026-10-25の検証記録](docs/verification/2026-10-25-bilingual.html) が現行の日英自動判別と実機確認の証跡です。`docs/verification/2026-10-13-stage1.html` は**当時の第1段階のみの履歴記録**であり、最新QAの結果ではありません。
 
 ## ビルド
 
-必要なもの: JDK 17、Android SDK（`ANDROID_HOME`）、Python 3、Git。Mozc のビルドには Bazelisk を使います（スクリプトが、固定した版を取得して SHA-256 を確かめます）。
+必要: JDK 17、Android SDK/NDK、.NET SDK 10、Python 3、Git、Bazelisk（Mozc用）。ABIごとのC# NativeAOT共有ライブラリを先にビルドします。
 
 ```sh
 cd android
-
-# 1. Mozc（変換エンジン本体と辞書）をビルドして、mozc/ の下に置く。初回は 30〜40 分かかる
 bash tools/build-mozc.sh
-
-# 2. アプリをビルドする
-./gradlew :app:assembleDebug
-
-# 3. 端末を1台だけつないで入れる（端末を指定する）
-adb -s <端末> install -r app/build/outputs/apk/debug/app-debug.apk
+ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" bash tools/build-meltype-native.sh
+./gradlew :engine:test :app:testDebugUnitTest :app:assembleDebug
 ```
 
-入れたあと、アプリ「Meltype」を開くと、キーボードを有効にして選ぶ手順が出ます。
+Android APK: `android/app/build/outputs/apk/debug/app-debug.apk`。端末テストには別途Androidのテスト用APKとエミュレーター／実機が必要です。
 
-- Mozc の版は `mozc/MOZC_COMMIT` に固定してあります（Windows 版の `native/mozc/MOZC_COMMIT` とは別の版です。Android 用の JNI が動くことを確かめた版にしてあります）。
-- Mozc の成果物（`libmozc.so`、`mozc.data`）は Git に入れていません。ない状態でビルドすると、上のスクリプトを先に実行するようメッセージを出して止まります。
-- `release` のビルドは、手元で確かめるためにデバッグ用の鍵で署名しています。**配布には使えません。**
+MozcのJNI／辞書成果物やC# NativeAOTの生成物、配布署名鍵はソース管理しません。正式なアプリID・リリース署名・配布方針は本家メンテナー判断待ち。デバッグ／QA署名済みAPKを公式リリースと扱わないでください。
 
-## テスト
+## リポジトリ構成
 
-```sh
-./gradlew :engine:test :app:testDebugUnitTest          # PC の上で動くテスト
-ANDROID_SERIAL=<端末> ./gradlew :mozc:connectedDebugAndroidTest :app:connectedDebugAndroidTest   # 端末の上で動くテスト
-```
+| パス | 役割 |
+| --- | --- |
+| `android/app/` | Android IME・画面・設定・候補バー・C JNIブリッジ |
+| `android/engine/` | フリックと従来入力用のKotlinエンジン |
+| `android/mozc/` | ローカルMozcのJNIと辞書 |
+| `src/Meltype.Core/` | Windows等と共有するC#日英判別・未確定文字の処理 |
+| `android/tools/build-meltype-native.sh` | C# NativeAOTのAndroid向けビルド |
 
-## 構成
-
-| モジュール | 役割 |
-|---|---|
-| `engine` | 入力の頭脳。読みと未確定文字の管理、ライブ変換の制御、ローマ字からかなへの組み立て。Android に依存しない純粋な Kotlin |
-| `mozc` | OSS 版 Mozc を JNI で呼ぶ層 |
-| `app` | キーボード本体（`InputMethodService`）、キーの描画、絵文字の画面、導入と設定の画面 |
-
-仕様は [docs/spec/](docs/spec/index.html) にあります（HTML。ここが仕様の唯一の正で、仕様を先に直してからコードを直す決まりにしています）。
-
-## ライセンスと同梱物
-
-GPL-3.0-or-later。同梱しているもの（Mozc とその辞書、Protocol Buffers、Kotlin の標準ライブラリ、Unicode の絵文字の一覧）とそのライセンスは [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) にあります。アプリの「ライセンス」の画面からも見られます。
-
-キーの絵（削除、確定、絵文字など）は、座標を書いて描いた自前のものです。ほかの製品の画像は使っていません。
-
-## AI の利用
-
-このフォルダーのコード・テスト・仕様書は、ほぼすべて Claude Code（Anthropic）が書きました（コミットの `Co-Authored-By` に書いています）。
-
-## Android統合版のレビュー上の注意
-
-- コアはC#を共有し、Kotlin再実装は行いません。
-- 本家の正式アプリID・署名鍵・リポジトリ配置はメンテナーの指定待ちです。
-- Android版Mozcは動作検証済みの版に固定し、デスクトップ版との差分を別途検証します。
-- 既存HTML仕様を維持し、Markdown版をCIで生成します。
+本家の既存ライセンス（GPL-3.0-or-later）と同梱物の著作権表示を維持します。今回の実装・テスト・文書の編集ではChatGPTによるAI支援を使用しています。

@@ -2,7 +2,7 @@
 
 **状態：QWERTYローマ字配列で実装済み・エミュレーター回帰試験済み。**
 
-従来のHTML仕様書はKotlin移植を予定していた段階の記録です。本節は実装後の構成を示すMarkdown版の仕様です。
+HTML正本の[08仕様](../../spec/08-auto-detection.html)と同期した実装後の仕様です。旧来の「Kotlin移植予定」の設計は採用していません。
 
 ## 目的
 
@@ -29,7 +29,7 @@
 
 - 日本語 `arigatou`、`konnichiwa`、英語 `hello`、`meeting`、混在 `hello arigatou` の入力をAndroidで検証。
 - 予測候補の表示、ネイティブ予測候補選択、英字・かな訂正候補、絵文字の候補フィルタ、設定の保存をテスト。
-- CIでは `android/app/src/androidTest` の9件のエミュレーター回帰試験を通過した場合のみAPKを検証済みとして扱う。
+- 2026-10-25のQAビルドではAndroid 15エミュレーターのInstrumentation **18件すべてが成功**。Pixel 10 Pro Fold（Android 17）で実機確認済み。[CI実行結果](https://github.com/KoheiTakada/Meltypetest/actions/runs/40163689812)。この確認は全端末・全アプリの互換性を保証しない。
 
 ## 制限と保留
 
