@@ -1,0 +1,131 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Publish signed Meltype Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Source branch or commit to build
+        required: true
+        default: feat/android-bilingual-adaptive-ime
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: android-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'KoheiTakada/Meltype'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Require the permanent signing key
+        env:
+          KEY_BASE64: ${{ secrets.MELTYPE_SIGNING_KEYSTORE_BASE64 }}
+          KEY_PASSWORD: ${{ secrets.MELTYPE_SIGNING_PASSWORD }}
+        run: |
+          if test -z "$KEY_BASE64" || test -z "$KEY_PASSWORD"; then
+            echo "::error::Configure MELTYPE_SIGNING_KEYSTORE_BASE64 and MELTYPE_SIGNING_PASSWORD in repository Actions secrets before publishing."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+      - name: Record exact source commit
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Verify native source matches the successful full QA
+        run: |
+          git diff --exit-code 264e90379b8413cea1bb7962ddc08af522055d84 HEAD -- src/Meltype.Core src/Meltype.Mac.Native android/mozc
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - name: Install NDK
+        run: sdkmanager 'ndk;28.2.13676358'
+      - uses: gradle/actions/wrapper-validation@v4
+      - name: Restore QA-built native libraries
+        uses: actions/download-artifact@v4
+        with:
+          repository: KoheiTakada/Meltype
+          run-id: 40804000313
+          name: android-qa-report-and-debug-apk
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: .qa-native
+      - name: Unpack verified native binaries and Mozc data
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, zipfile
+          root = pathlib.Path.cwd()
+          candidates = list((root / ".qa-native").rglob("app-debug.apk"))
+          if len(candidates) != 1:
+              raise SystemExit("Missing expected verified QA APK")
+          entries = {}
+          for abi in ("arm64-v8a", "x86_64"):
+              entries[f"lib/{abi}/libMeltypeNative.so"] = root / f"android/app/prebuilt/{abi}/libMeltypeNative.so"
+              entries[f"lib/{abi}/libmozc.so"] = root / f"android/mozc/src/main/jniLibs/{abi}/libmozc.so"
+          entries["assets/mozc.data"] = root / "android/mozc/src/main/assets/mozc.data"
+          entries["assets/MOZC_NOTICES.txt"] = root / "android/mozc/src/main/assets/MOZC_NOTICES.txt"
+          with zipfile.ZipFile(candidates[0]) as archive:
+              for member, target in entries.items():
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(archive.read(member))
+          PY
+      - name: Restore permanent signing key
+        env:
+          KEY_BASE64: ${{ secrets.MELTYPE_SIGNING_KEYSTORE_BASE64 }}
+          KEY_PASSWORD: ${{ secrets.MELTYPE_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/Meltype-signing.p12"
+          keytool -list -storetype PKCS12 -keystore "$RUNNER_TEMP/Meltype-signing.p12" -storepass "$KEY_PASSWORD" -alias meltype > /dev/null
+      - name: Run unit tests and build signed APK
+        working-directory: android
+        env:
+          ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/28.2.13676358
+          MELTYPE_SIGNING_KEYSTORE: ${{ runner.temp }}/Meltype-signing.p12
+          MELTYPE_SIGNING_PASSWORD: ${{ secrets.MELTYPE_SIGNING_PASSWORD }}
+          MELTYPE_VERSION_CODE: ${{ github.run_number }}
+          MELTYPE_VERSION_NAME: 0.1.${{ github.run_number }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :engine:test :app:testDebugUnitTest :app:assembleRelease
+      - name: Verify package and signing certificate
+        env:
+          EXPECTED_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          mkdir -p android/build/distribution
+          cp android/app/build/outputs/apk/release/app-release.apk android/build/distribution/Meltype.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs android/build/distribution/Meltype.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging android/build/distribution/Meltype.apk | grep "package: name='app.meltype.keyboard' versionCode='$EXPECTED_VERSION_CODE'"
+          sha256sum android/build/distribution/Meltype.apk > android/build/distribution/Meltype.sha256
+          git rev-parse HEAD > android/build/distribution/source-commit.txt
+      - name: Upload signed APK as build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Meltype-Android-signed
+          path: android/build/distribution/
+          retention-days: 30
+      - name: Publish APK to GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          VERSION_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          tag="android-v0.1.$VERSION_NUMBER"
+          printf 'Android test build from %s\nSigned with the permanent Meltype key.\nPackage ID: app.meltype.keyboard\nNative QA source: run 40804000313.\n' "$SOURCE_SHA" > android/build/distribution/RELEASE-NOTES.md
+          gh release create "$tag" android/build/distribution/Meltype.apk#Meltype.apk android/build/distribution/Meltype.sha256#Meltype.sha256 --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --title "Meltype Android 0.1.$VERSION_NUMBER" --notes-file android/build/distribution/RELEASE-NOTES.md --prerelease
