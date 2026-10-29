@@ -34,7 +34,12 @@ interface KeyListener {
     fun onKey(action: KeyAction, direction: Direction, timeMs: Long)
 
     /** 空白キーが長押しされた。カーソルを動かす状態に入ってよければ true（未確定文字があるあいだは false）。 */
-    fun onSpaceLanguageMenu(): Boolean = false
+    fun onSpaceLanguageMenu(x: Float, y: Float): Boolean = false
+
+    /** A space long-press retains the original pointer stream; hover is tracked here. */
+    fun onSpaceLanguageMenuMove(x: Float, y: Float) = Unit
+    fun onSpaceLanguageMenuRelease(x: Float, y: Float) = Unit
+    fun onSpaceLanguageMenuCancel() = Unit
 
     fun onCursorModeStart(): Boolean
 
@@ -150,7 +155,7 @@ class KeyboardView(context: Context) : View(context) {
         if (k == null || k.action != KeyAction.Space || !holds(k)) return@Runnable
         if (!cursorGesture.longPress(SystemClock.uptimeMillis())) return@Runnable
         if (layout.id == LayoutId.ROMAJI || layout.id == LayoutId.QWERTY) {
-            if (listener?.onSpaceLanguageMenu() == true) {
+            if (listener?.onSpaceLanguageMenu(downX, downY) == true) {
                 spaceMenuOpened = true
                 KeyFeedback.play(this, hapticEnabled, KeyFeedback.Kind.LONG_PRESS)
             }
@@ -316,6 +321,8 @@ class KeyboardView(context: Context) : View(context) {
                 if (!startPress(event.x, event.y, event.eventTime)) { tracker.cancel(); return false }
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
+                // A second finger cancels this one-finger selection gesture.
+                if (spaceMenuOpened) { cancelTouch(); return true }
                 val i = event.actionIndex
                 val outcome = tracker.down(event.getPointerId(i), event.getX(i), event.getY(i), fresh = false)
                 if (outcome == TouchTracker.Outcome.COMPLETE_THEN_START) {
@@ -372,6 +379,10 @@ class KeyboardView(context: Context) : View(context) {
     /** 押している指が動いた。案内の向きが変わったときだけ、案内を描き直す（この View は描き直さない）。 */
     private fun movePress(x: Float, y: Float) {
         val k = pressed ?: return
+        if (k.action == KeyAction.Space && spaceMenuOpened) {
+            listener?.onSpaceLanguageMenuMove(x, y)
+            return
+        }
         when (k.action) {
             is KeyAction.Flick -> {
                 val d = FlickDetector.direction(x - downX, y - downY, cellW * k.width)
@@ -395,7 +406,11 @@ class KeyboardView(context: Context) : View(context) {
                 action is KeyAction.Flick ->
                     fire(action, FlickDetector.direction(x - downX, y - downY, cellW * k.width), time)
                 // カーソルを動かしたあとは、空白を入れない。
-                action == KeyAction.Space && spaceMenuOpened -> Unit
+                action == KeyAction.Space && spaceMenuOpened -> {
+                    // Clear before the callback: switching layouts cancels the active touch.
+                    spaceMenuOpened = false
+                    listener?.onSpaceLanguageMenuRelease(x, y)
+                }
                 action == KeyAction.Space && cursorGesture.end() -> Unit
                 SoftKeyTapAcceptance.shouldCommit(
                     sameKey = keyAtPoint(x, y) === k,
@@ -416,10 +431,11 @@ class KeyboardView(context: Context) : View(context) {
     fun cancelTouch() { tracker.cancel(); releaseTouch() }
 
     private fun releaseTouch() {
+        if (spaceMenuOpened) listener?.onSpaceLanguageMenuCancel()
+        spaceMenuOpened = false
         repeater.stop()
         removeCallbacks(longPress)
         cursorGesture.cancel()
-        spaceMenuOpened = false
         popup?.hide()
         if (pressed != null) { pressed = null; invalidate() }
     }
