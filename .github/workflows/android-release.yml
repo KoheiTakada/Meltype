@@ -107,7 +107,7 @@ jobs:
                   data = base64.b64decode(item, validate=True)
               except (binascii.Error, ValueError):
                   continue
-              if len(data) > 1000 and data.startswith(b"\\x30"):
+              if len(data) > 1000 and data[0] == 0x30:
                   out.write_bytes(data)
                   break
           else:
