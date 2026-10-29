@@ -31,6 +31,10 @@ class KeyboardViewTouchTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val fired = ArrayList<Pair<KeyAction, Direction>>()
     private var cursorModeAsked = 0
+    private var menuOpenedAt: Pair<Float, Float>? = null
+    private var menuReleasedAt: Pair<Float, Float>? = null
+    private var menuMoveCount = 0
+    private var menuCancelCount = 0
     private lateinit var view: KeyboardView
     private var activity: Activity? = null
     private var downTime = 0L
@@ -43,6 +47,13 @@ class KeyboardViewTouchTest {
             fired += action to direction
             if (action == KeyAction.Language) languageSwitchesTo?.let { view.layout = it }
         }
+        override fun onSpaceLanguageMenu(x: Float, y: Float): Boolean {
+            menuOpenedAt = x to y
+            return true
+        }
+        override fun onSpaceLanguageMenuMove(x: Float, y: Float) { menuMoveCount++ }
+        override fun onSpaceLanguageMenuRelease(x: Float, y: Float) { menuReleasedAt = x to y }
+        override fun onSpaceLanguageMenuCancel() { menuCancelCount++ }
         override fun onCursorModeStart(): Boolean { cursorModeAsked++; return true }
         override fun onCursorMove(steps: Int) = Unit
     }
@@ -251,5 +262,37 @@ class KeyboardViewTouchTest {
         send(MotionEvent.ACTION_UP, 0, listOf(0), listOf(delete))                  // 置いたままだった指が離れても、何も起きない
         Thread.sleep(500)
         assertEquals(deletes, count(KeyAction.Delete)); assertEquals(1, count(KeyAction.Language))
+    }
+
+    /** The original touch stream (no extra DOWN) must reach the menu and never insert Space. */
+    @Test fun held_space_drag_then_release_selects_without_second_tap() {
+        shownView()
+        onMain { view.layout = Layouts.romaji }
+        val start = center(KeyAction.Space)
+        val end = start.first to start.second - 80f
+        send(MotionEvent.ACTION_DOWN, 0, listOf(0), listOf(start))
+        Thread.sleep(450)
+        instrumentation.waitForIdleSync()
+        assertEquals(start, menuOpenedAt)
+        send(MotionEvent.ACTION_MOVE, 0, listOf(0), listOf(end))
+        assertTrue("hover MOVE delivered", menuMoveCount > 0)
+        send(MotionEvent.ACTION_UP, 0, listOf(0), listOf(end))
+        assertEquals(end, menuReleasedAt)
+        assertEquals(0, count(KeyAction.Space))
+        assertEquals(0, menuCancelCount)
+    }
+
+    /** Lifting without entering any menu item must not insert a space either. */
+    @Test fun held_space_release_without_drag_consumes_the_press() {
+        shownView()
+        onMain { view.layout = Layouts.qwerty }
+        val position = center(KeyAction.Space)
+        send(MotionEvent.ACTION_DOWN, 0, listOf(0), listOf(position))
+        Thread.sleep(450)
+        instrumentation.waitForIdleSync()
+        assertEquals(position, menuOpenedAt)
+        send(MotionEvent.ACTION_UP, 0, listOf(0), listOf(position))
+        assertEquals(position, menuReleasedAt)
+        assertEquals(0, count(KeyAction.Space))
     }
 }
