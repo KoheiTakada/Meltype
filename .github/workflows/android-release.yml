@@ -2,6 +2,12 @@
 name: Publish signed Meltype Android APK
 
 on:
+  # A deliberately tagged workflow change can initiate one release from Chat.
+  # Ordinary edits to the workflow do not publish.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/android-release.yml'
   workflow_dispatch:
     inputs:
       source_ref:
@@ -20,7 +26,7 @@ concurrency:
 
 jobs:
   publish:
-    if: github.repository == 'KoheiTakada/Meltype'
+    if: github.repository == 'KoheiTakada/Meltype' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[publish-meltype]'))
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -35,7 +41,7 @@ jobs:
           fi
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref }}
+          ref: ${{ inputs.source_ref || 'feat/android-bilingual-adaptive-ime' }}
           fetch-depth: 0
       - name: Record exact source commit
         id: source
