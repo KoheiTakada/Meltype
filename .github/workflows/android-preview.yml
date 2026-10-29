@@ -73,20 +73,38 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon :engine:test :app:testDebugUnitTest :app:assembleDebug
+      - name: Preserve original debug APK and make side-by-side test build
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android/build/preview
+          cp android/app/build/outputs/apk/debug/app-debug.apk android/build/preview/Meltype-original-package.apk
+          # Different app ID bypasses signature-mismatch upgrades without uninstalling the user's installed IME.
+          # This is CI-local only and does not mutate the checked-in Gradle configuration.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/build.gradle.kts')
+          src = p.read_text()
+          before = 'applicationIdSuffix = ".bilingualtest"'
+          assert src.count(before) == 1
+          p.write_text(src.replace(before, 'applicationIdSuffix = ".swipepreview"'))
+          PY
+          cd android
+          ./gradlew --no-daemon :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk build/preview/Meltype-side-by-side.apk
       - name: Record source and binary SHA
         if: success()
         run: |
-          mkdir -p android/build/preview
           git rev-parse HEAD > android/build/preview/source-commit.txt
           printf '%s\n' 'Native dependencies reused from successful Android QA run 40186993501 (db65e27).' > android/build/preview/native-provenance.txt
-          sha256sum android/app/build/outputs/apk/debug/app-debug.apk > android/build/preview/apk-sha256.txt
+          sha256sum android/build/preview/Meltype-original-package.apk android/build/preview/Meltype-side-by-side.apk > android/build/preview/apk-sha256.txt
       - name: Upload freshly compiled debug APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: meltype-android-current-preview-apk
           path: |
-            android/app/build/outputs/apk/debug/app-debug.apk
             android/build/preview/
             android/app/build/test-results/testDebugUnitTest/
           retention-days: 30
