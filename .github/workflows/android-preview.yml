@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Debug preview for the Android-only Space swipe change. NOT a release build.
-name: Android debug APK preview
+name: Android debug build verification
 on:
   push:
     branches: [feat/android-bilingual-adaptive-ime]
@@ -73,37 +73,23 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon :engine:test :app:testDebugUnitTest :app:assembleDebug
-      - name: Preserve original debug APK and make side-by-side test build
+      - name: Save disposable debug APK and build unsigned release variant
         if: success()
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p android/build/preview
-          cp android/app/build/outputs/apk/debug/app-debug.apk android/build/preview/Meltype-original-package.apk
-          # Different app ID bypasses signature-mismatch upgrades without uninstalling the user's installed IME.
-          # This is CI-local only and does not mutate the checked-in Gradle configuration.
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('android/app/build.gradle.kts')
-          src = p.read_text()
-          before = 'applicationIdSuffix = ".bilingualtest"'
-          assert src.count(before) == 1
-          p.write_text(src.replace(before, 'applicationIdSuffix = ".swipepreview"'))
-          PY
+          cp android/app/build/outputs/apk/debug/app-debug.apk android/build/preview/Meltype-debug-ephemeral.apk
           cd android
-          ./gradlew --no-daemon :app:assembleDebug
-          cp app/build/outputs/apk/debug/app-debug.apk build/preview/Meltype-side-by-side.apk
-      - name: Record source and binary SHA
-        if: success()
-        run: |
-          git rev-parse HEAD > android/build/preview/source-commit.txt
-          printf '%s\n' 'Native dependencies reused from successful Android QA run 40186993501 (db65e27).' > android/build/preview/native-provenance.txt
-          sha256sum android/build/preview/Meltype-original-package.apk android/build/preview/Meltype-side-by-side.apk > android/build/preview/apk-sha256.txt
+          ./gradlew --no-daemon :app:assembleRelease
+          git -C .. rev-parse HEAD > build/preview/source-commit.txt
+          printf '%s\n' 'NOT FOR DISTRIBUTION: debug APK uses an ephemeral CI key; release APK is unsigned.' > build/preview/README.txt
+          sha256sum build/preview/Meltype-debug-ephemeral.apk > build/preview/apk-sha256.txt
       - name: Upload freshly compiled debug APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: meltype-android-current-preview-apk
+          name: meltype-android-debug-build-check
           path: |
             android/build/preview/
             android/app/build/test-results/testDebugUnitTest/
