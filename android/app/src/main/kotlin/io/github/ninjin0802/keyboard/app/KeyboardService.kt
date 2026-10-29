@@ -638,11 +638,13 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     /** 未確定文字があるあいだは、空白キーは「次の候補」のまま。変換しない欄では、持っている1文字を確定してから動かす。 */
-    override fun onSpaceLanguageMenu(): Boolean {
+    override fun onSpaceLanguageMenu(x: Float, y: Float): Boolean {
         val anchor = keyboardView ?: return false
         if (nav.current != LayoutId.ROMAJI && nav.current != LayoutId.QWERTY) return false
         return languagePopup.show(
             anchor = anchor,
+            touchX = x,
+            touchY = y,
             selected = nav.current,
             allowEmoji = Settings(this).emojiEnabled,
             onSelectLanguage = { target ->
@@ -650,6 +652,18 @@ class KeyboardService : InputMethodService(), KeyListener {
             },
             onEmoji = { screens.openEmoji(SystemClock.uptimeMillis()) },
         )
+    }
+
+    override fun onSpaceLanguageMenuMove(x: Float, y: Float) {
+        keyboardView?.let { languagePopup.move(it, x, y) }
+    }
+
+    override fun onSpaceLanguageMenuRelease(x: Float, y: Float) {
+        keyboardView?.let { languagePopup.release(it, x, y) }
+    }
+
+    override fun onSpaceLanguageMenuCancel() {
+        languagePopup.dismiss()
     }
 
     override fun onCursorModeStart(): Boolean {
