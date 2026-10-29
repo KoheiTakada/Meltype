@@ -9,11 +9,11 @@ android {
     namespace = "io.github.ninjin0802.keyboard.app"
     compileSdk = 36
     defaultConfig {
-        applicationId = "io.github.ninjin0802.keyboard"
+        applicationId = "app.meltype.keyboard"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = System.getenv("MELTYPE_VERSION_CODE")?.toIntOrNull() ?: 1
+        versionName = System.getenv("MELTYPE_VERSION_NAME") ?: "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
@@ -37,9 +37,22 @@ android {
                 ?: error("MELTYPE_TEST_KEY_PASSWORD is missing")
         }
     }
+    // Distributable APKs are signed only with the long-lived private key.
+    // Never fall back to a runner-generated debug key for the release variant.
+    val distributionKeystore = System.getenv("MELTYPE_SIGNING_KEYSTORE")?.takeIf { it.isNotBlank() }
+    if (distributionKeystore != null) {
+        signingConfigs.create("meltypeDistribution") {
+            storeFile = file(distributionKeystore)
+            storePassword = System.getenv("MELTYPE_SIGNING_PASSWORD")
+                ?: error("MELTYPE_SIGNING_PASSWORD is missing")
+            keyAlias = "meltype"
+            keyPassword = System.getenv("MELTYPE_SIGNING_PASSWORD")
+                ?: error("MELTYPE_SIGNING_PASSWORD is missing")
+        }
+    }
     buildTypes {
         getByName("debug") {
-            applicationIdSuffix = ".bilingualtest"
+            applicationIdSuffix = ".debug"
             if (qaKeystore != null) {
                 signingConfig = signingConfigs.getByName("qaDebug")
             }
@@ -48,8 +61,9 @@ android {
             // 使わないコードを落として小さくする。残すものは mozc/consumer-rules.pro に書いてある。
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            // 手元で確かめるためだけに、デバッグ用の鍵で署名する。配るときは、配布用の鍵に替える。
-            signingConfig = signingConfigs.getByName("debug")
+            // The release variant is deliberately unsigned without the secret key.
+            // Only the release workflow may publish Meltype.apk.
+            signingConfig = distributionKeystore?.let { signingConfigs.getByName("meltypeDistribution") }
         }
     }
     compileOptions {
