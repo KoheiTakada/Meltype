@@ -26,15 +26,28 @@ adb wait-for-device
   adb shell wm size
   adb shell wm density
 } > "$REPORT/device-info.txt"
+# Read both app IDs from the APK manifests. The Java/Kotlin namespace is
+# independent from applicationId and must not be used as the installed package.
+AAPT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools/36.0.0/aapt"
+test -x "$AAPT" || { echo "aapt not found at $AAPT" >&2; exit 2; }
+read_apk_package() {
+  "$AAPT" dump badging "$1" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p" | head -n 1
+}
+PACKAGE="$(read_apk_package "$APP")"
+TEST_PACKAGE="$(read_apk_package "$TEST")"
+test -n "$PACKAGE" && test -n "$TEST_PACKAGE" && test "$TEST_PACKAGE" = "$PACKAGE.test" || {
+  echo "APK app / test package mismatch: app=$PACKAGE test=$TEST_PACKAGE" >&2
+  exit 2
+}
+printf 'app_id=%s\ntest_id=%s\n' "$PACKAGE" "$TEST_PACKAGE" >> "$REPORT/device-info.txt"
 adb install -r "$APP"
 adb install -r "$TEST"
-PACKAGE=io.github.ninjin0802.keyboard.bilingualtest
 adb shell pm path "$PACKAGE" | grep -F 'package:'
 adb shell am start -W -n "$PACKAGE/io.github.ninjin0802.keyboard.app.MainActivity"
 status=0
 adb shell am instrument -w -r -e class \
   io.github.ninjin0802.keyboard.app.core.LanguageDetectionDeviceTest,io.github.ninjin0802.keyboard.app.SettingsScreenDeviceTest \
-  "$PACKAGE.test/androidx.test.runner.AndroidJUnitRunner" \
+  "$TEST_PACKAGE/androidx.test.runner.AndroidJUnitRunner" \
   | tee "$REPORT/instrumentation.log" || status=1
 python3 "$ROOT/tools/instrumentation-report.py" \
   --log "$REPORT/instrumentation.log" \
