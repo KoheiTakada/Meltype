@@ -95,7 +95,25 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          printf '%s' "$KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/Meltype-signing.p12"
+          python3 - <<'PY'
+          import base64, binascii, os, pathlib, re, sys
+          raw = os.environ["KEY_BASE64"]
+          candidates = [raw.strip(), "".join(raw.split())]
+          # Support accidentally pasted setup-file text or quoted base64.
+          candidates.extend(re.findall(r"[A-Za-z0-9+/=]{1000,}", raw))
+          out = pathlib.Path(os.environ["RUNNER_TEMP"]) / "Meltype-signing.p12"
+          for item in candidates:
+              try:
+                  data = base64.b64decode(item, validate=True)
+              except (binascii.Error, ValueError):
+                  continue
+              if len(data) > 1000 and data.startswith(b"\\x30"):
+                  out.write_bytes(data)
+                  break
+          else:
+              print("::error::MELTYPE_SIGNING_KEYSTORE_BASE64 is not a valid PKCS12 Base64 value. Copy the 4664-character line immediately following this label in Meltype-signing-setup.txt, excluding the label and spaces.")
+              sys.exit(1)
+          PY
           keytool -list -storetype PKCS12 -keystore "$RUNNER_TEMP/Meltype-signing.p12" -storepass "$KEY_PASSWORD" -alias meltype > /dev/null
       - name: Run unit tests and build signed APK
         working-directory: android
