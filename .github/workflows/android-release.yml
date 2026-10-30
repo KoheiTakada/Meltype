@@ -39,6 +39,44 @@ jobs:
             echo "::error::Configure MELTYPE_SIGNING_KEYSTORE_BASE64 and MELTYPE_SIGNING_PASSWORD in repository Actions secrets before publishing."
             exit 1
           fi
+      - name: Diagnose signing secrets without exposing their values
+        env:
+          KEY_BASE64: ${{ secrets.MELTYPE_SIGNING_KEYSTORE_BASE64 }}
+          KEY_PASSWORD: ${{ secrets.MELTYPE_SIGNING_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 - <<'PY'
+          import base64, binascii, hashlib, os, pathlib, re, subprocess, sys
+          raw = os.environ["KEY_BASE64"]
+          candidates = [raw.strip(), "".join(raw.split())]
+          candidates += re.findall(r"[A-Za-z0-9+/=]{1000,}", raw)
+          expected = "f3e1cc9f38d7ae462812baff63bd90f3562057d279509581be5c9fb8e2695fe8"
+          out = pathlib.Path(os.environ["RUNNER_TEMP"]) / "Meltype-signing.p12"
+          good = None
+          for item in candidates:
+              try:
+                  decoded = base64.b64decode(item, validate=True)
+              except (binascii.Error, ValueError):
+                  continue
+              if hashlib.sha256(decoded).hexdigest() == expected:
+                  good = decoded
+                  break
+          if good is None:
+              print("::error::Signing keystore secret does not match the generated key backup. Replace only the keystore Base64 secret with the complete 4664-character value.")
+              sys.exit(2)
+          out.write_bytes(good)
+          print("Signing keystore checksum: MATCH")
+          proc = subprocess.run(
+              ["keytool", "-list", "-storetype", "PKCS12", "-keystore", str(out),
+               "-storepass", os.environ["KEY_PASSWORD"], "-alias", "meltype"],
+              text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+          if proc.returncode:
+              print("::error::Signing password or key alias is invalid for the validated keystore. Re-register the signing password from the same backup.")
+              sys.exit(3)
+          print("Signing password and alias: VERIFIED")
+          PY
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_ref || 'feat/android-bilingual-adaptive-ime' }}
