@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-name: Android ONNX CPU probe (no model)
+name: Android ONNX CPU probe (smoke model)
 on:
   push:
     branches: [exp/android-local-onnx-reranker]
@@ -16,7 +16,7 @@ permissions:
 jobs:
   cpu-probe-build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -31,12 +31,28 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon :onnx-probe:testDebugUnitTest :onnx-probe:assembleDebug
-      - name: Upload experimental AAR and unit test XML
+          ./gradlew --no-daemon :onnx-probe:testDebugUnitTest :onnx-probe:assembleDebug :onnx-probe:assembleDebugAndroidTest
+      - name: Enable emulator acceleration
+        run: test -e /dev/kvm && sudo chmod 666 /dev/kvm || true
+      - name: Verify actual ONNX inference on Android 15 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          ram-size: 2048M
+          emulator-boot-timeout: 900
+          disable-animations: true
+          script: cd android && ./gradlew --no-daemon :onnx-probe:connectedDebugAndroidTest
+      - name: Upload AAR and test reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-onnx-cpu-probe-aar
+          name: android-onnx-cpu-probe-results
           path: |
             android/onnx-probe/build/outputs/aar/
             android/onnx-probe/build/test-results/testDebugUnitTest/
+            android/onnx-probe/build/outputs/androidTest-results/
+            android/onnx-probe/build/reports/androidTests/
           retention-days: 14
+          if-no-files-found: warn

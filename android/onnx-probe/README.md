@@ -52,3 +52,10 @@ Links:
 - https://github.com/YAMA-TANA/fumiori-ai-ime
 - https://github.com/YAMA-TANA/fumiori-ai-ime/blob/main/ranker/onnx_dual_encoder_base.py
 - https://github.com/YAMA-TANA/fumiori-ai-ime/blob/main/MODEL_CARD.md
+
+## Tested with an actual Android ONNX execution path
+
+`OnnxCpuSmokeTest` runs a **275-byte synthetic Cast/Multiply ONNX graph** on
+an Android 15 emulator, checks the exact float32 tensor output and logs p50/p95
+for that graph. This establishes that ORT's Android CPU JNI execution path
+works, **not** that Fumiori's 70M model loads or meets an IME deadline.
