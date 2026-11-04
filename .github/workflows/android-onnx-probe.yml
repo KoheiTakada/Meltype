@@ -37,12 +37,12 @@ jobs:
       - name: Verify actual ONNX inference on Android 15 emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
-          target: google_apis
+          api-level: 30
+          target: default
           arch: x86_64
-          ram-size: 2048M
+          ram-size: 1536M
           emulator-boot-timeout: 900
-          disable-animations: true
+          disable-animations: false
           script: cd android && ./gradlew --no-daemon :onnx-probe:connectedDebugAndroidTest
       - name: Upload AAR and test reports
         if: always()

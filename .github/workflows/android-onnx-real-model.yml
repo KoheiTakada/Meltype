@@ -83,15 +83,17 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon :onnx-probe:testDebugUnitTest :onnx-probe:assembleDebugAndroidTest
 
-      - name: Run real model on Android 15 CPU and collect benchmark logs
+      - name: Enable KVM hardware acceleration
+        run: test -e /dev/kvm && sudo chmod 666 /dev/kvm || true
+      - name: Run real model on Android 11 CPU and collect benchmark logs
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
-          target: google_apis
+          api-level: 30
+          target: default
           arch: x86_64
-          disk-size: 4096M
-          ram-size: 3072M
-          disable-animations: true
+          disk-size: 2048M
+          ram-size: 1536M
+          disable-animations: false
           emulator-boot-timeout: 900
           script: |
             cd android
