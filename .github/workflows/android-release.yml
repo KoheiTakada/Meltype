@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Verify permanent signing secrets before attempting this distribution.
 name: Publish signed Meltype Android APK
 
 on:
