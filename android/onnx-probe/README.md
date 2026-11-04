@@ -59,3 +59,16 @@ Links:
 an Android 15 emulator, checks the exact float32 tensor output and logs p50/p95
 for that graph. This establishes that ORT's Android CPU JNI execution path
 works, **not** that Fumiori's 70M model loads or meets an IME deadline.
+
+## Optional real model benchmark (not bundled)
+
+`.github/workflows/android-onnx-real-model.yml` downloads Fumiori's official
+v2.1.1-beta Windows MSI, verifies the publisher's SHA-256, extracts the current
+Dual-Encoder INT8 ONNX and matching tokenizer.json, and prepares exact token
+IDs with Hugging Face `tokenizers` on the CI host. It then runs the model on an
+Android 15 x86_64 emulator via the Android ONNX Runtime CPU provider and logs
+model load time and p50/p95 for seven context embedding runs. If MSI extraction
+or required files fail, the workflow fails rather than silently substituting
+the old Cross-Encoder or reporting bogus inference numbers. Models are never
+committed or uploaded as CI artifacts. Emulator results are NOT representative
+of Pixel ARM64 latency. Real-time IME integration remains a separate step.
