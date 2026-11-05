@@ -31,6 +31,7 @@ jobs:
           run-id: 42017991891
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: .qa-artifact
+          merge-multiple: true
       - name: Restore APKs and verify their exact source
         run: |
           set -euo pipefail
