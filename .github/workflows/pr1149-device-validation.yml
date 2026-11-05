@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 KoheiTakada
+name: PR 1149 device validation
+on:
+  push:
+    branches: [codex/pr1149-device-validation-20261105]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  device:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 347484413185b4c7d74c08be752f9924d59a0b3f
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-qa-report-and-debug-apk
+          repository: KoheiTakada/Meltype
+          run-id: 42017991891
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: .qa-artifact
+      - name: Restore APKs and verify their exact source
+        run: |
+          set -euo pipefail
+          test "$(cat .qa-artifact/build/qa/source-commit.txt)" = '347484413185b4c7d74c08be752f9924d59a0b3f'
+          mkdir -p android/app/build/outputs/apk/debug android/app/build/outputs/apk/androidTest/debug
+          cp .qa-artifact/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/
+          cp .qa-artifact/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk android/app/build/outputs/apk/androidTest/debug/
+          python3 - <<'PY'
+          import pathlib, zipfile
+          root = pathlib.Path('android/mozc/src/main')
+          with zipfile.ZipFile('android/app/build/outputs/apk/debug/app-debug.apk') as apk:
+              for abi in ('arm64-v8a', 'x86_64'):
+                  path = root / 'jniLibs' / abi / 'libmozc.so'
+                  path.parent.mkdir(parents=True, exist_ok=True)
+                  path.write_bytes(apk.read(f'lib/{abi}/libmozc.so'))
+              for name in ('mozc.data', 'MOZC_NOTICES.txt'):
+                  path = root / 'assets' / name
+                  path.parent.mkdir(parents=True, exist_ok=True)
+                  path.write_bytes(apk.read(f'assets/{name}'))
+          PY
+      - name: Install NDK and retry the emulator image download
+        run: |
+          sdkmanager 'ndk;28.2.13676358'
+          for attempt in 1 2 3; do
+            if sdkmanager 'system-images;android-35;google_apis;x86_64'; then exit 0; fi
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep 10
+          done
+      - name: Enable hardware acceleration
+        run: test -e /dev/kvm && sudo chmod 666 /dev/kvm || true
+      - name: Run app and Mozc device tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disk-size: 2048M
+          ram-size: 2048M
+          disable-linux-hw-accel: false
+          emulator-boot-timeout: 900
+          disable-animations: true
+          script: |
+            set -e
+            bash android/tools/run-instrumentation-tests.sh
+            cd android
+            ./gradlew --no-daemon :mozc:connectedDebugAndroidTest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr1149-device-validation-report
+          path: |
+            android/build/qa/
+            android/mozc/build/outputs/androidTest-results/connected/
+          retention-days: 7
+          if-no-files-found: warn
