@@ -26,7 +26,7 @@ jobs:
       - uses: gradle/actions/wrapper-validation@v4
       - uses: actions/download-artifact@v4
         with:
-          artifact-ids: 13410898702
+          artifact-ids: 13411489324
           repository: KoheiTakada/Meltype
           run-id: 42017991891
           github-token: ${{ secrets.GITHUB_TOKEN }}
