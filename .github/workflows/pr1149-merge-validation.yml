@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 KoheiTakada
+name: PR 1149 merge validation
+on:
+  push:
+    branches: [codex/pr1149-merge-validation-20261105]
+permissions:
+  contents: read
+env:
+  UPSTREAM_BASE: 11fa1e6a6194b281c0b5a5ce9361e44b0f649eeb
+  UPSTREAM_MERGE: 71f69fe5af3d35e8792ac267d008961127a75f2f
+jobs:
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare and verify the exact upstream merge tree
+        shell: bash
+        run: |
+          git fetch --no-tags https://github.com/yksr-melt/Meltype.git "$UPSTREAM_BASE" "$UPSTREAM_MERGE"
+          git -c user.name='CI validation' -c user.email='ci-validation@example.invalid' merge --no-commit --no-ff "$UPSTREAM_BASE"
+          git diff --exit-code "$UPSTREAM_MERGE" -- . ':(exclude).github/workflows/pr1149-merge-validation.yml'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Shared Core regression tests
+        run: dotnet run --project src/Meltype.Core.Tests/Meltype.Core.Tests.csproj -c Release
+      - name: Linux Unicode key mapping
+        run: python3 linux/tests/test_virtual_key.py
+      - name: Mozc-UT dictionary merge
+        run: python3 native/mozc/tests/test_merge_ut_dictionary.py
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare and verify the exact upstream merge tree
+        shell: bash
+        run: |
+          git fetch --no-tags https://github.com/yksr-melt/Meltype.git "$UPSTREAM_BASE" "$UPSTREAM_MERGE"
+          git -c user.name='CI validation' -c user.email='ci-validation@example.invalid' merge --no-commit --no-ff "$UPSTREAM_BASE"
+          git diff --exit-code "$UPSTREAM_MERGE" -- . ':(exclude).github/workflows/pr1149-merge-validation.yml'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build
+        run: dotnet build Meltype.sln -c Release
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Mozc-UT dictionary merge
+        run: python native/mozc/tests/test_merge_ut_dictionary.py
+      - name: Build Meltype IME
+        shell: pwsh
+        run: ./native/tip/build.ps1 -Configuration Release
+      - name: Test package scan failure handling
+        shell: powershell
+        run: .\tools\Test-WindowsPackageScan.ps1
+      - name: Windows regression tests
+        run: dotnet run --project src/Meltype.Tests/Meltype.Tests.csproj -c Release --no-build
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare and verify the exact upstream merge tree
+        shell: bash
+        run: |
+          git fetch --no-tags https://github.com/yksr-melt/Meltype.git "$UPSTREAM_BASE" "$UPSTREAM_MERGE"
+          git -c user.name='CI validation' -c user.email='ci-validation@example.invalid' merge --no-commit --no-ff "$UPSTREAM_BASE"
+          git diff --exit-code "$UPSTREAM_MERGE" -- . ':(exclude).github/workflows/pr1149-merge-validation.yml'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Check whitespace
+        run: dotnet format whitespace --folder --verify-no-changes
+      - name: Build with recommended analyzers
+        run: dotnet build src/Meltype.Core/Meltype.Core.csproj -c Release -p:AnalysisLevel=latest-recommended
+  codeql:
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [csharp, c-cpp, javascript-typescript, python, actions]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare and verify the exact upstream merge tree
+        shell: bash
+        run: |
+          git fetch --no-tags https://github.com/yksr-melt/Meltype.git "$UPSTREAM_BASE" "$UPSTREAM_MERGE"
+          git -c user.name='CI validation' -c user.email='ci-validation@example.invalid' merge --no-commit --no-ff "$UPSTREAM_BASE"
+          git diff --exit-code "$UPSTREAM_MERGE" -- . ':(exclude).github/workflows/pr1149-merge-validation.yml'
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
