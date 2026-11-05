@@ -14,7 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 347484413185b4c7d74c08be752f9924d59a0b3f
+          ref: 890362a55638834c8c4e598826393e3fb4ff96f2
+          fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -25,7 +26,7 @@ jobs:
       - uses: gradle/actions/wrapper-validation@v4
       - uses: actions/download-artifact@v4
         with:
-          name: android-qa-report-and-debug-apk
+          artifact-ids: 13410898702
           repository: KoheiTakada/Meltype
           run-id: 42017991891
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -34,6 +35,14 @@ jobs:
         run: |
           set -euo pipefail
           test "$(cat .qa-artifact/build/qa/source-commit.txt)" = '347484413185b4c7d74c08be752f9924d59a0b3f'
+          git diff --exit-code 347484413185b4c7d74c08be752f9924d59a0b3f HEAD -- . \
+            ':(exclude).github/workflows/android-qa.yml' \
+            ':(exclude)android/docs/QA-TESTING.md' \
+            ':(exclude)android/tools/instrumentation-report.py' \
+            ':(exclude)android/tools/run-instrumentation-tests.sh' \
+            ':(exclude)android/tools/test-instrumentation-report.py'
+          mkdir -p android/build/qa
+          echo '347484413185b4c7d74c08be752f9924d59a0b3f' > android/build/qa/apk-source-commit.txt
           mkdir -p android/app/build/outputs/apk/debug android/app/build/outputs/apk/androidTest/debug
           cp .qa-artifact/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/
           cp .qa-artifact/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk android/app/build/outputs/apk/androidTest/debug/
