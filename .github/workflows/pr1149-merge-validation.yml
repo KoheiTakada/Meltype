@@ -8,7 +8,7 @@ permissions:
   contents: read
 env:
   UPSTREAM_BASE: 11fa1e6a6194b281c0b5a5ce9361e44b0f649eeb
-  UPSTREAM_MERGE: 71f69fe5af3d35e8792ac267d008961127a75f2f
+  UPSTREAM_MERGE: 1f6a6e12b4f505efdc150e9a0302d21646985eda
 jobs:
   core:
     strategy:
