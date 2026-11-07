@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Isolated verification build: signing credentials are never sent to CI.
-name: PR 1149 fixed release verification
+name: PR 1149 exact merge Android verification
 on:
   push:
     branches: [codex/pr1149-device-validation-20261105]
@@ -17,6 +17,11 @@ jobs:
           ref: 176e5a7e645689abc5d728863452eef6bef00efd
           fetch-depth: 0
           persist-credentials: false
+      - name: Check out exact upstream merge
+        run: |
+          git fetch --no-tags https://github.com/yksr-melt/Meltype.git '24ef0fb12de22e63c7d812df84bc3b61486d18a3'
+          git checkout --detach '24ef0fb12de22e63c7d812df84bc3b61486d18a3'
+          test "$(git show -s --format=%P HEAD)" = 'ea61481e710b64c940d7ea1f856cbaeb2d10fc02 176e5a7e645689abc5d728863452eef6bef00efd'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -25,40 +30,20 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
       - uses: gradle/actions/wrapper-validation@v4
-      - name: Install Android NDK
-        run: sdkmanager 'ndk;28.2.13676358'
-      - uses: actions/download-artifact@v4
+      - uses: actions/setup-dotnet@v4
         with:
-          artifact-ids: 13414845079
-          repository: KoheiTakada/Meltype
-          run-id: 42023332665
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: .qa-artifact
-          merge-multiple: true
-      - name: Restore exact previously tested NativeAOT and Mozc
+          dotnet-version: '10.0.x'
+      - name: Install Android NDK and native build tools
         run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = '176e5a7e645689abc5d728863452eef6bef00efd'
-          test "$(cat .qa-artifact/build/qa/source-commit.txt)" = 'a53b1ff71dfc39c98e0cf45186c7710ec73c4fc5'
-          grep -qx 'Expected: 36' .qa-artifact/build/qa/summary.md
-          grep -qx 'Passed: 36' .qa-artifact/build/qa/summary.md
-          git diff --exit-code a53b1ff71dfc39c98e0cf45186c7710ec73c4fc5 HEAD -- android/mozc/ android/tools/build-mozc.sh android/tools/build-meltype-native.sh src/Meltype.Core/ src/Meltype.Mac.Native/
-          python3 - <<'PY'
-          import pathlib, zipfile
-          apk = pathlib.Path('.qa-artifact/app/build/outputs/apk/debug/app-debug.apk')
-          with zipfile.ZipFile(apk) as src:
-              for abi in ('arm64-v8a', 'x86_64'):
-                  for name, dst in (
-                      ('libMeltypeNative.so', pathlib.Path('android/app/prebuilt') / abi / 'libMeltypeNative.so'),
-                      ('libmozc.so', pathlib.Path('android/mozc/src/main/jniLibs') / abi / 'libmozc.so'),
-                  ):
-                      dst.parent.mkdir(parents=True, exist_ok=True)
-                      dst.write_bytes(src.read(f'lib/{abi}/{name}'))
-              for name in ('mozc.data', 'MOZC_NOTICES.txt'):
-                  dst = pathlib.Path('android/mozc/src/main/assets') / name
-                  dst.parent.mkdir(parents=True, exist_ok=True)
-                  dst.write_bytes(src.read(f'assets/{name}'))
-          PY
+          sudo apt-get update
+          sudo apt-get install -y patchelf curl git python3 build-essential
+          sdkmanager 'ndk;28.2.13676358'
+      - name: Rebuild pinned Mozc from source
+        run: bash android/tools/build-mozc.sh
+      - name: Rebuild merged shared Core from source
+        env:
+          ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/28.2.13676358
+        run: bash android/tools/build-meltype-native.sh
       - name: Build debug tests and minified release
         working-directory: android
         env:
@@ -211,7 +196,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pr1149-fixed-verification-evidence
+          name: pr1149-merge-verification-evidence
           path: |
             repro/*.png
             repro/*.xml
@@ -223,7 +208,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: pr1149-fixed-release-for-private-signing
+          name: pr1149-merge-release-unsigned
           path: delivery/
           retention-days: 7
           if-no-files-found: error
