@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Temporary build on the fork; no signing secrets are used in this workflow.
-name: PR 1149 distribution APK build
+# Temporary reproduction of the minified release installed on the device.
+name: PR 1149 release input crash reproduction
 on:
   push:
     branches: [codex/pr1149-device-validation-20261105]
@@ -8,15 +8,10 @@ permissions:
   contents: read
   actions: read
 jobs:
-  release:
+  reproduce:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: a53b1ff71dfc39c98e0cf45186c7710ec73c4fc5
-          fetch-depth: 0
-          persist-credentials: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -24,67 +19,58 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
-      - uses: gradle/actions/wrapper-validation@v4
-      - name: Install Android NDK
-        run: sdkmanager 'ndk;28.2.13676358'
       - uses: actions/download-artifact@v4
         with:
-          artifact-ids: 13414845079
+          artifact-ids: 13558736408
           repository: KoheiTakada/Meltype
-          run-id: 42023332665
+          run-id: 42333823307
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: .qa-artifact
+          path: release
           merge-multiple: true
-      - name: Restore native libraries from the successful QA build
+      - name: Prepare the exact release and a focused input field
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = 'a53b1ff71dfc39c98e0cf45186c7710ec73c4fc5'
-          test "$(cat .qa-artifact/build/qa/source-commit.txt)" = "$(git rev-parse HEAD)"
-          grep -qx 'Expected: 36' .qa-artifact/build/qa/summary.md
-          grep -qx 'Passed: 36' .qa-artifact/build/qa/summary.md
-          python3 - <<'PY'
-          import pathlib, zipfile
-          apk = pathlib.Path('.qa-artifact/app/build/outputs/apk/debug/app-debug.apk')
-          with zipfile.ZipFile(apk) as src:
-              for abi in ('arm64-v8a', 'x86_64'):
-                  for name, dst in (
-                      ('libMeltypeNative.so', pathlib.Path('android/app/prebuilt') / abi / 'libMeltypeNative.so'),
-                      ('libmozc.so', pathlib.Path('android/mozc/src/main/jniLibs') / abi / 'libmozc.so'),
-                  ):
-                      dst.parent.mkdir(parents=True, exist_ok=True)
-                      dst.write_bytes(src.read(f'lib/{abi}/{name}'))
-              for name in ('mozc.data', 'MOZC_NOTICES.txt'):
-                  dst = pathlib.Path('android/mozc/src/main/assets') / name
-                  dst.parent.mkdir(parents=True, exist_ok=True)
-                  dst.write_bytes(src.read(f'assets/{name}'))
-          PY
-      - name: Build production release variant
-        working-directory: android
-        env:
-          ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/28.2.13676358
-          MELTYPE_VERSION_CODE: '7'
-          MELTYPE_VERSION_NAME: '0.1.7'
-        run: ./gradlew --no-daemon :engine:test :app:testDebugUnitTest :app:assembleRelease
-      - name: Verify package and 16 KiB alignment
-        run: |
-          set -euo pipefail
-          apk=android/app/build/outputs/apk/release/app-release-unsigned.apk
-          python3 android/tools/check-apk-16k.py "$apk"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | grep "package: name='app.meltype.keyboard' versionCode='7'"
-          mkdir -p delivery
-          cp "$apk" delivery/Meltype-release-unsigned.apk
-          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" delivery/apksigner.jar
-          sha256sum delivery/Meltype-release-unsigned.apk > delivery/unsigned.sha256
-          git rev-parse HEAD > delivery/source-commit.txt
-      - name: Sign a disposable copy for emulator smoke test
-        run: |
-          set -euo pipefail
-          keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/smoke.p12" -storetype PKCS12 -storepass android -keypass android -alias smoke -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Meltype temporary smoke test'
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$RUNNER_TEMP/smoke.p12" --ks-key-alias smoke --ks-pass pass:android --key-pass pass:android --out "$RUNNER_TEMP/Meltype-smoke.apk" delivery/Meltype-release-unsigned.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$RUNNER_TEMP/Meltype-smoke.apk"
+          mkdir -p repro work/src/ime/repro work/classes work/dex
+          cp release/Meltype-release-unsigned.apk repro/unsigned.apk
+          keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/repro.p12" -storetype PKCS12 -storepass android -keypass android -alias test -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Meltype test'
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$RUNNER_TEMP/repro.p12" --ks-key-alias test --ks-pass pass:android --key-pass pass:android --out repro/Meltype.apk repro/unsigned.apk
+          cat > work/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="ime.repro">
+            <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/>
+            <application android:label="IME Repro" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+              <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="stateAlwaysVisible" />
+            </application>
+          </manifest>
+          EOF
+          cat > work/src/ime/repro/MainActivity.java <<'EOF'
+          package ime.repro;
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.content.Context;
+          import android.view.inputmethod.InputMethodManager;
+          import android.widget.EditText;
+          public class MainActivity extends Activity {
+            public void onCreate(Bundle saved) {
+              super.onCreate(saved);
+              EditText editor = new EditText(this);
+              editor.setSingleLine();
+              editor.setHint("Type here");
+              setContentView(editor);
+              editor.requestFocus();
+              editor.postDelayed(() -> ((InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE)).showSoftInput(editor, InputMethodManager.SHOW_IMPLICIT), 1000);
+            }
+          }
+          EOF
+          javac -source 8 -target 8 -bootclasspath "$ANDROID_HOME/platforms/android-36/android.jar" -d work/classes work/src/ime/repro/MainActivity.java
+          "$ANDROID_HOME/build-tools/36.0.0/d8" --lib "$ANDROID_HOME/platforms/android-36/android.jar" --min-api 26 --output work/dex work/classes/ime/repro/MainActivity.class
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" package -f -M work/AndroidManifest.xml -I "$ANDROID_HOME/platforms/android-36/android.jar" -F work/harness-unsigned.apk
+          cp work/dex/classes.dex classes.dex
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" add work/harness-unsigned.apk classes.dex
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -f 4 work/harness-unsigned.apk work/harness-aligned.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$RUNNER_TEMP/repro.p12" --ks-key-alias test --ks-pass pass:android --key-pass pass:android --out repro/harness.apk work/harness-aligned.apk
       - name: Enable hardware acceleration
         run: test -e /dev/kvm && sudo chmod 666 /dev/kvm || true
-      - name: Smoke test release variant on Android 15
+      - name: Reproduce keyboard opening and typing
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -96,16 +82,17 @@ jobs:
           emulator-boot-timeout: 900
           disable-animations: true
           script: |
-            adb install "$RUNNER_TEMP/Meltype-smoke.apk"
-            adb shell am start -W -n app.meltype.keyboard/io.github.ninjin0802.keyboard.app.MainActivity
-            adb shell pidof app.meltype.keyboard
-            adb shell ime list -a | grep -F 'app.meltype.keyboard/io.github.ninjin0802.keyboard.app.KeyboardService'
-            adb shell ime enable app.meltype.keyboard/io.github.ninjin0802.keyboard.app.KeyboardService
-            adb shell ime set app.meltype.keyboard/io.github.ninjin0802.keyboard.app.KeyboardService
-      - name: Upload unsigned release for private signing
+            bash -c 'adb install repro/Meltype.apk && adb install repro/harness.apk && adb shell ime enable app.meltype.keyboard/io.github.ninjin0802.keyboard.app.KeyboardService && adb shell ime set app.meltype.keyboard/io.github.ninjin0802.keyboard.app.KeyboardService && adb logcat -c && adb shell am start -W -n ime.repro/.MainActivity && sleep 5 && adb shell wm size && adb shell uiautomator dump /sdcard/window.xml && adb pull /sdcard/window.xml repro/window.xml && adb shell screencap -p /sdcard/ime.png && adb pull /sdcard/ime.png repro/ime.png && adb shell input tap 100 1500 && sleep 3 && adb logcat -b crash -d > repro/crash.log && adb logcat -d > repro/logcat.log && adb shell pidof app.meltype.keyboard > repro/pid.txt || true'
+      - name: Upload reproduction evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pr1149-release-for-private-signing
-          path: delivery/
-          retention-days: 7
-          if-no-files-found: error
+          name: pr1149-input-crash-evidence
+          path: |
+            repro/crash.log
+            repro/logcat.log
+            repro/window.xml
+            repro/ime.png
+            repro/pid.txt
+          retention-days: 3
+          if-no-files-found: warn
