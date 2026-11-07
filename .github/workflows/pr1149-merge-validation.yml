@@ -7,8 +7,8 @@ on:
 permissions:
   contents: read
 env:
-  UPSTREAM_BASE: 11fa1e6a6194b281c0b5a5ce9361e44b0f649eeb
-  UPSTREAM_MERGE: f5585939e13c3e5e7c24cea60f1c2edd9198cdac
+  UPSTREAM_BASE: ea61481e710b64c940d7ea1f856cbaeb2d10fc02
+  UPSTREAM_MERGE: 24ef0fb12de22e63c7d812df84bc3b61486d18a3
 jobs:
   core:
     strategy:
@@ -26,8 +26,8 @@ jobs:
         shell: bash
         run: |
           git fetch --no-tags https://github.com/yksr-melt/Meltype.git "$UPSTREAM_BASE" "$UPSTREAM_MERGE"
-          git -c user.name='CI validation' -c user.email='ci-validation@example.invalid' merge --no-commit --no-ff "$UPSTREAM_BASE"
-          git diff --exit-code "$UPSTREAM_MERGE" -- . ':(exclude).github/workflows/pr1149-merge-validation.yml'
+          git checkout --detach "$UPSTREAM_MERGE"
+          test "$(git show -s --format=%P HEAD)" = 'ea61481e710b64c940d7ea1f856cbaeb2d10fc02 176e5a7e645689abc5d728863452eef6bef00efd'
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
@@ -49,8 +49,8 @@ jobs:
         shell: bash
         run: |
           git fetch --no-tags https://github.com/yksr-melt/Meltype.git "$UPSTREAM_BASE" "$UPSTREAM_MERGE"
-          git -c user.name='CI validation' -c user.email='ci-validation@example.invalid' merge --no-commit --no-ff "$UPSTREAM_BASE"
-          git diff --exit-code "$UPSTREAM_MERGE" -- . ':(exclude).github/workflows/pr1149-merge-validation.yml'
+          git checkout --detach "$UPSTREAM_MERGE"
+          test "$(git show -s --format=%P HEAD)" = 'ea61481e710b64c940d7ea1f856cbaeb2d10fc02 176e5a7e645689abc5d728863452eef6bef00efd'
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
@@ -81,8 +81,8 @@ jobs:
         shell: bash
         run: |
           git fetch --no-tags https://github.com/yksr-melt/Meltype.git "$UPSTREAM_BASE" "$UPSTREAM_MERGE"
-          git -c user.name='CI validation' -c user.email='ci-validation@example.invalid' merge --no-commit --no-ff "$UPSTREAM_BASE"
-          git diff --exit-code "$UPSTREAM_MERGE" -- . ':(exclude).github/workflows/pr1149-merge-validation.yml'
+          git checkout --detach "$UPSTREAM_MERGE"
+          test "$(git show -s --format=%P HEAD)" = 'ea61481e710b64c940d7ea1f856cbaeb2d10fc02 176e5a7e645689abc5d728863452eef6bef00efd'
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
@@ -90,6 +90,33 @@ jobs:
         run: dotnet format whitespace --folder --verify-no-changes
       - name: Build with recommended analyzers
         run: dotnet build src/Meltype.Core/Meltype.Core.csproj -c Release -p:AnalysisLevel=latest-recommended
+  accuracy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out exact upstream merge and base
+        run: |
+          git fetch --no-tags https://github.com/yksr-melt/Meltype.git "$UPSTREAM_BASE" "$UPSTREAM_MERGE"
+          git checkout --detach "$UPSTREAM_MERGE"
+          test "$(git show -s --format=%P HEAD)" = 'ea61481e710b64c940d7ea1f856cbaeb2d10fc02 176e5a7e645689abc5d728863452eef6bef00efd'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Compare accuracy with upstream main
+        run: |
+          set -euo pipefail
+          dotnet run --project src/Meltype.Core.Tests -c Release -- --eval-json "$RUNNER_TEMP/pr.json"
+          dotnet run --project src/Meltype.Core.Tests -c Release -- --judge-corpus "$RUNNER_TEMP/pr-words.tsv"
+          git worktree add "$RUNNER_TEMP/base" "$UPSTREAM_BASE"
+          dotnet run --project "$RUNNER_TEMP/base/src/Meltype.Core.Tests" -c Release -- --eval-json "$RUNNER_TEMP/base.json"
+          dotnet run --project "$RUNNER_TEMP/base/src/Meltype.Core.Tests" -c Release -- --judge-corpus "$RUNNER_TEMP/base-words.tsv" "$RUNNER_TEMP/pr-words.tsv"
+          dotnet run --project src/Meltype.Core.Tests -c Release -- --judge-corpus "$RUNNER_TEMP/pr-words.tsv" "$RUNNER_TEMP/base-words.tsv"
+          node .github/bot/pr-checks.mjs impact "$RUNNER_TEMP/base-words.tsv" "$RUNNER_TEMP/pr-words.tsv" "$RUNNER_TEMP/changes.tsv"
+          node .github/bot/pr-checks.mjs compare "$RUNNER_TEMP/base.json" "$RUNNER_TEMP/pr.json"
   codeql:
     strategy:
       fail-fast: false
@@ -109,8 +136,8 @@ jobs:
         shell: bash
         run: |
           git fetch --no-tags https://github.com/yksr-melt/Meltype.git "$UPSTREAM_BASE" "$UPSTREAM_MERGE"
-          git -c user.name='CI validation' -c user.email='ci-validation@example.invalid' merge --no-commit --no-ff "$UPSTREAM_BASE"
-          git diff --exit-code "$UPSTREAM_MERGE" -- . ':(exclude).github/workflows/pr1149-merge-validation.yml'
+          git checkout --detach "$UPSTREAM_MERGE"
+          test "$(git show -s --format=%P HEAD)" = 'ea61481e710b64c940d7ea1f856cbaeb2d10fc02 176e5a7e645689abc5d728863452eef6bef00efd'
       - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
