@@ -40,6 +40,7 @@ jobs:
             <application android:label="IME Repro" android:theme="@android:style/Theme.Material.Light.NoActionBar">
               <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="stateAlwaysVisible" />
             </application>
+            <instrumentation android:name=".SetRomaji" android:targetPackage="app.meltype.keyboard" />
           </manifest>
           EOF
           cat > work/src/ime/repro/MainActivity.java <<'EOF'
@@ -61,7 +62,22 @@ jobs:
             }
           }
           EOF
-          javac -source 8 -target 8 -bootclasspath "$ANDROID_HOME/platforms/android-36/android.jar" -d work/classes work/src/ime/repro/MainActivity.java
+          cat > work/src/ime/repro/SetRomaji.java <<'EOF'
+          package ime.repro;
+          import android.app.Instrumentation;
+          import android.os.Bundle;
+          public class SetRomaji extends Instrumentation {
+            @Override public void onCreate(Bundle args) {
+              super.onCreate(args);
+              boolean ok = getTargetContext().getSharedPreferences("settings", 0).edit()
+                .putString("japanese_layout", "romaji").commit();
+              Bundle result = new Bundle();
+              result.putString("romaji", ok ? "set" : "failed");
+              finish(ok ? -1 : 0, result);
+            }
+          }
+          EOF
+          javac -source 8 -target 8 -bootclasspath "$ANDROID_HOME/platforms/android-36/android.jar" -d work/classes work/src/ime/repro/*.java
           "$ANDROID_HOME/build-tools/36.0.0/d8" --lib "$ANDROID_HOME/platforms/android-36/android.jar" --min-api 26 --output work/dex work/classes/ime/repro/*.class
           "$ANDROID_HOME/build-tools/36.0.0/aapt" package -f -M work/AndroidManifest.xml -I "$ANDROID_HOME/platforms/android-36/android.jar" -F work/harness-unsigned.apk
           cp work/dex/classes.dex classes.dex
@@ -82,7 +98,7 @@ jobs:
           emulator-boot-timeout: 900
           disable-animations: true
           script: |
-            bash -c 'adb install repro/Meltype.apk && adb install repro/harness.apk && adb shell ime enable app.meltype.keyboard/io.github.ninjin0802.keyboard.app.KeyboardService && adb shell ime set app.meltype.keyboard/io.github.ninjin0802.keyboard.app.KeyboardService && adb logcat -c && adb shell am start -W -n ime.repro/.MainActivity && sleep 5 && adb shell wm size && adb shell uiautomator dump /sdcard/window.xml && adb pull /sdcard/window.xml repro/window.xml && adb shell screencap -p /sdcard/ime.png && adb pull /sdcard/ime.png repro/ime.png && adb shell input tap 100 1500 && sleep 3 && adb logcat -b crash -d > repro/crash.log && adb logcat -d > repro/logcat.log && adb shell pidof app.meltype.keyboard > repro/pid.txt || true'
+            bash -c 'adb install repro/Meltype.apk && adb install repro/harness.apk && adb shell am instrument -w -r ime.repro/.SetRomaji && adb shell ime enable app.meltype.keyboard/io.github.ninjin0802.keyboard.app.KeyboardService && adb shell ime set app.meltype.keyboard/io.github.ninjin0802.keyboard.app.KeyboardService && adb logcat -c && adb shell am start -W -n ime.repro/.MainActivity && sleep 5 && adb shell wm size && adb shell uiautomator dump /sdcard/window.xml && adb pull /sdcard/window.xml repro/window.xml && adb shell screencap -p /sdcard/ime.png && adb pull /sdcard/ime.png repro/ime.png && adb shell input tap 20 445 && sleep 3 && adb logcat -b crash -d > repro/crash.log && adb logcat -d > repro/logcat.log && adb shell pidof app.meltype.keyboard > repro/pid.txt || true'
       - name: Upload reproduction evidence
         if: always()
         uses: actions/upload-artifact@v4
