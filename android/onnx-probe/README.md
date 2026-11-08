@@ -34,11 +34,12 @@ Output: `embeddings` (float32, shape [1, 384]).
 
 ### Unimplemented / do not claim yet
 
-1. Exact SentencePiece tokenizer (Ruri-v3/ModernBERT) on Android. A tokenizer
-   mismatch makes the output meaningless even if ONNX runs successfully.
-2. Model acquisition and availability of the **current Dual-Encoder** weights.
-   The older `model-manifest.json` refers to an older Cross-Encoder and must
-   not be used with this runtime.
+1. Validate the native tokenizer on Android against the same tokenizer.json
+   and Python token IDs used by Fumiori. A tokenizer mismatch makes the output
+   meaningless even if ONNX runs successfully.
+2. Decide how the **current Dual-Encoder** model will be installed and
+   attributed before integrating it into the IME. The older
+   `model-manifest.json` refers to an older Cross-Encoder and must not be used.
 3. Measure cold start, p50/p95, memory, battery and model accuracy on
    Pixel ARM64 with real tokenized fixture pairs. The ONNX part by itself does
    not demonstrate interactive-latency compliance.
@@ -72,3 +73,8 @@ or required files fail, the workflow fails rather than silently substituting
 the old Cross-Encoder or reporting bogus inference numbers. Models are never
 committed or uploaded as CI artifacts. Emulator results are NOT representative
 of Pixel ARM64 latency. Real-time IME integration remains a separate step.
+
+On 2026-11-09, the real-model test succeeded on the Android 11 x86_64 emulator:
+70,538,845 bytes; initialization 224 ms; seven warmed context encodes p50
+5.30 ms and p95 5.64 ms. This is an emulator result, not a Pixel measurement,
+an end-to-end keyboard latency, or an accuracy benchmark.

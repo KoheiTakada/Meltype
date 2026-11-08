@@ -56,6 +56,7 @@ jobs:
           sha256sum "$MODEL" "$TOKENIZER"
           mkdir -p android/onnx-probe/src/androidTest/assets
           cp "$MODEL" android/onnx-probe/src/androidTest/assets/fumiori-dual-encoder-int8.onnx
+          cp "$TOKENIZER" android/onnx-probe/src/androidTest/assets/fumiori-tokenizer.json
           python3 -m pip install --user 'tokenizers==0.22.1'
           TOKENIZER_FILE="$TOKENIZER" python3 - <<'PY'
           import json, os
@@ -69,14 +70,26 @@ jobs:
               "context": "彼の顔のはな",
               "flower": "花",
               "nose": "鼻",
+              "mixed": "Googleで検索 😊",
+              "long": "日本語とEnglishを混ぜた長い文章。" * 12,
           }.items():
               result = tokenizer.encode(text)
-              payload[key] = {"input_ids": result.ids, "attention_mask": result.attention_mask}
+              payload[key] = {"text": text, "input_ids": result.ids, "attention_mask": result.attention_mask}
           Path("android/onnx-probe/src/androidTest/assets/fumiori-fixtures.json").write_text(
               json.dumps(payload, ensure_ascii=False), encoding="utf-8"
           )
           print("Fixture token lengths:", {k: len(v["input_ids"]) for k,v in payload.items()})
           PY
+
+      - name: Build Android tokenizer native libraries
+        env:
+          ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/28.2.13676358
+        run: |
+          sdkmanager 'ndk;28.2.13676358'
+          rustup target add aarch64-linux-android x86_64-linux-android
+          cargo install cargo-ndk --version 4.1.2 --locked
+          cd android/onnx-probe/tokenizer
+          cargo ndk -t arm64-v8a -t x86_64 -P 26 -o ../src/main/jniLibs build --release
 
       - name: Test and assemble Android instrumentation APK
         working-directory: android
