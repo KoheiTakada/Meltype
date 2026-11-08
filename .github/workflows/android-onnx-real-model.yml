@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 KoheiTakada
+name: Android ONNX real Fumiori CPU experiment
+on:
+  push:
+    branches: [personal/android-development]
+    paths:
+      - '.github/workflows/android-onnx-real-model.yml'
+      - 'android/onnx-probe/src/androidTest/kotlin/app/meltype/onnxprobe/RealFumioriCpuBenchmarkTest.kt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-model-cpu-inference:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - uses: gradle/actions/wrapper-validation@v4
+
+      # The Fumiori Dual-Encoder weights are NOT checked into or redistributed
+      # with Meltype. Extract only on an ephemeral CI worker from the public MSI.
+      - name: Download the official Fumiori Windows beta and verify SHA-256
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y msitools
+          curl --fail --location --retry 3 --silent --show-error \
+            -o /tmp/fumiori-v2.1.1-beta.msi \
+            https://github.com/YAMA-TANA/fumiori-ai-ime/releases/download/v2.1.1-beta/Yamatana-AI-IME-MOZC-Ver-2.1.1-beta-x64.msi
+          echo "43B919E448F1A57351BB7D6FA4361C32589A8B375775DE4E23DCBD84C1997D16  /tmp/fumiori-v2.1.1-beta.msi" | sha256sum --check
+          mkdir -p /tmp/fumiori-installed
+          msiextract -C /tmp/fumiori-installed /tmp/fumiori-v2.1.1-beta.msi
+          echo "ONNX models found:"
+          find /tmp/fumiori-installed -type f -iname '*.onnx' | head -30
+
+      - name: Prepare the real ONNX and exact tokenizer fixtures
+        run: |
+          set -eu
+          MODEL=$(find /tmp/fumiori-installed -type f -iname '*dual*encoder*int8*.onnx' -print -quit)
+          TOKENIZER="$(dirname "$MODEL")/tokenizer.json"
+          if [ -z "$MODEL" ] || [ ! -f "$TOKENIZER" ]; then
+            echo "::error::Current Dual-Encoder INT8 ONNX or tokenizer missing from MSI extraction"
+            exit 1
+          fi
+          echo "Selected model file:"
+          du -h "$MODEL"
+          sha256sum "$MODEL" "$TOKENIZER"
+          mkdir -p android/onnx-probe/src/androidTest/assets
+          cp "$MODEL" android/onnx-probe/src/androidTest/assets/fumiori-dual-encoder-int8.onnx
+          python3 -m pip install --user 'tokenizers==0.22.1'
+          TOKENIZER_FILE="$TOKENIZER" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          from tokenizers import Tokenizer
+          tokenizer = Tokenizer.from_file(os.environ["TOKENIZER_FILE"])
+          tokenizer.enable_truncation(max_length=48)
+          tokenizer.enable_padding(pad_id=3, pad_token="<pad>")
+          payload = {}
+          for key, text in {
+              "context": "彼の顔のはな",
+              "flower": "花",
+              "nose": "鼻",
+          }.items():
+              result = tokenizer.encode(text)
+              payload[key] = {"input_ids": result.ids, "attention_mask": result.attention_mask}
+          Path("android/onnx-probe/src/androidTest/assets/fumiori-fixtures.json").write_text(
+              json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+          )
+          print("Fixture token lengths:", {k: len(v["input_ids"]) for k,v in payload.items()})
+          PY
+
+      - name: Test and assemble Android instrumentation APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :onnx-probe:testDebugUnitTest :onnx-probe:assembleDebugAndroidTest
+
+      - name: Enable KVM hardware acceleration
+        run: test -e /dev/kvm && sudo chmod 666 /dev/kvm || true
+      - name: Run real model on Android 11 CPU and collect benchmark logs
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          disk-size: 2048M
+          ram-size: 1536M
+          disable-animations: false
+          emulator-boot-timeout: 900
+          script: |
+            cd android && ./gradlew --no-daemon :onnx-probe:connectedDebugAndroidTest && adb logcat -d -s MeltypeONNX:I
+
+      - name: Publish test reports WITHOUT the model or tokenizer
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-real-fumiori-cpu-test-reports
+          path: |
+            android/onnx-probe/build/outputs/androidTest-results/
+            android/onnx-probe/build/reports/androidTests/
+            android/onnx-probe/build/test-results/testDebugUnitTest/
+          retention-days: 14
+          if-no-files-found: warn
