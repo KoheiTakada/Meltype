@@ -11,6 +11,8 @@ conversion is unchanged. The experiment sends no text to a network service.
 - Model file is loaded from an app-private absolute path (not shipped).
 - Accepts token ID + attention mask pairs, runs the Fumiori-style dual encoder
   and returns its 384-dimensional float embedding.
+- Uses the model's own tokenizer on Android. Five Japanese, mixed-language and
+  long inputs matched the Python tokenizer's token IDs in the emulator test.
 - Reranks up to ten candidate embeddings by cosine similarity and protects
   Mozc ordering with a minimum improvement margin, exception fallback, and
   an in-memory cache. This is a **simplified prototype**, not the complete
@@ -21,7 +23,9 @@ conversion is unchanged. The experiment sends no text to a network service.
 ## Local build
 
 ```sh
-cd android
+cd android/onnx-probe/tokenizer
+cargo ndk -t arm64-v8a -t x86_64 -P 26 -o ../src/main/jniLibs build --release
+cd ../..
 ./gradlew :onnx-probe:testDebugUnitTest :onnx-probe:assembleDebug
 ```
 
@@ -34,19 +38,16 @@ Output: `embeddings` (float32, shape [1, 384]).
 
 ### Unimplemented / do not claim yet
 
-1. Validate the native tokenizer on Android against the same tokenizer.json
-   and Python token IDs used by Fumiori. A tokenizer mismatch makes the output
-   meaningless even if ONNX runs successfully.
-2. Decide how the **current Dual-Encoder** model will be installed and
+1. Decide how the **current Dual-Encoder** model will be installed and
    attributed before integrating it into the IME. The older
    `model-manifest.json` refers to an older Cross-Encoder and must not be used.
-3. Measure cold start, p50/p95, memory, battery and model accuracy on
+2. Measure cold start, p50/p95, memory, battery and model accuracy on
    Pixel ARM64 with real tokenized fixture pairs. The ONNX part by itself does
    not demonstrate interactive-latency compliance.
-4. Integrate the ranker between `MozcConverter.convert` and the shared C#
+3. Integrate the ranker between `MozcConverter.convert` and the shared C#
    core's `CoreMozcCallbacks`, with explicit opt-in and asynchronous
    deadlines/cancellation. Do not block the IME main thread.
-5. Fumiori's word-boundary/grammatical scores, multi-clause joint path and
+4. Fumiori's word-boundary/grammatical scores, multi-clause joint path and
    persistent 384-dim candidate cache, plus provenance/license notices.
 
 Links:
@@ -74,7 +75,10 @@ the old Cross-Encoder or reporting bogus inference numbers. Models are never
 committed or uploaded as CI artifacts. Emulator results are NOT representative
 of Pixel ARM64 latency. Real-time IME integration remains a separate step.
 
-On 2026-11-09, the real-model test succeeded on the Android 11 x86_64 emulator:
-70,538,845 bytes; initialization 224 ms; seven warmed context encodes p50
-5.30 ms and p95 5.64 ms. This is an emulator result, not a Pixel measurement,
-an end-to-end keyboard latency, or an accuracy benchmark.
+On 2026-11-09, [run 42498604547](https://github.com/KoheiTakada/Meltype/actions/runs/42498604547)
+tested commit `4cbe92c`: the real model, native tokenizer parity and synthetic
+ONNX test passed on the Android 11 x86_64 emulator (3/3); the ranking unit tests
+passed (4/4). The model was 70,538,845 bytes; initialization was 288 ms, and
+seven warmed context encodes took p50 6.84 ms / p95 7.05 ms. ARM64 native
+libraries also compiled. These emulator numbers are not Pixel measurements,
+end-to-end keyboard latency, or an accuracy benchmark.
