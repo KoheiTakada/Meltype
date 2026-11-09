@@ -26,6 +26,15 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".clipboard.ClipboardEditorActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <provider
+            android:name=".clipboard.ClipboardContentProvider"
+            android:authorities="app.meltype.keyboard.clipboard"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+        <activity
             android:name=".LicensesActivity"
             android:exported="false" />
         <!-- BIND_INPUT_METHOD は、このサービスをシステムだけが呼べるようにする属性。権限の要求ではない。 -->
