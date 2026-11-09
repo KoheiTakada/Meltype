@@ -794,6 +794,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     private fun saveProcessedClipboard(result: Result<String>) {
+        if (clipboardWorker.isShutdown) return
         val text = result.getOrNull()
         if (text == null) {
             Toast.makeText(this, "処理できませんでした（言語・画像・モデルを確認）", Toast.LENGTH_SHORT).show()
