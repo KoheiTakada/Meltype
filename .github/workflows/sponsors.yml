@@ -8,8 +8,6 @@ name: sponsors
 # (公開のスポンサーだけなら読めることがあるが、読めなければ失敗する)。
 # Pull Request を出すトークン: bot の GitHub App (vars.BOT_APP_ID) があればそれ (CI も流れる)、無ければ github.token。
 on:
-  schedule:
-    - cron: '43 21 * * *'
   workflow_dispatch:
 
 permissions:
