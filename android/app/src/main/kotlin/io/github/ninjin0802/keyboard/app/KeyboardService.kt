@@ -79,6 +79,7 @@ import io.github.ninjin0802.keyboard.mozc.MozcConverter
 import io.github.ninjin0802.keyboard.mozc.MozcEngine
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
+import io.github.ninjin0802.keyboard.app.clipboard.ClipboardCleanupJob
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardContentProvider
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardEditorActivity
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
@@ -248,6 +249,8 @@ class KeyboardService : InputMethodService(), KeyListener {
         createdAtNanos = System.nanoTime()
         clipboardManager = getSystemService(ClipboardManager::class.java)
         clipboardManager?.addPrimaryClipChangedListener(clipboardListener)
+        ClipboardCleanupJob.ensureScheduled(this)
+        clipboardWorker.execute { clipboardStore.prune() }
         Settings(this).let {
             nav.choose(it.japaneseLayout, it.englishLayout)
             it.registerChangeListener(settingsListener)
