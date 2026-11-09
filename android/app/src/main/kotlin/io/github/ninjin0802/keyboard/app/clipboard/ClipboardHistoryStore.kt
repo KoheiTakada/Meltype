@@ -112,9 +112,16 @@ class ClipboardHistoryStore(private val app: Context) :
                 "SELECT id, stored_name FROM clips WHERE fingerprint = ?", arrayOf(fingerprint)
             ).use { cursor ->
                 if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(0)
                     val oldName = cursor.getString(1)
-                    if (oldName != null && oldName != storedName) ownedFile(oldName)?.delete()
-                    db.delete("clips", "id = ?", arrayOf(cursor.getLong(0).toString()))
+                    // Keep existing IDs: editors may still hold a URI grant to this row.
+                    if (storedName != null && oldName != storedName) ownedFile(storedName)?.delete()
+                    val updated = android.content.ContentValues().apply {
+                        put("created_at", System.currentTimeMillis())
+                    }
+                    db.update("clips", updated, "id = ?", arrayOf(id.toString()))
+                    db.setTransactionSuccessful()
+                    return id
                 }
             }
             val values = android.content.ContentValues().apply {
