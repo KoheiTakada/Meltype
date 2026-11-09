@@ -80,7 +80,7 @@ jobs:
           PY
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || '0cd094c578a1db25544f38a5a8277b268e4cdeff' }}
+          ref: ${{ inputs.source_ref || 'feat/android-bilingual-adaptive-ime' }}
           fetch-depth: 0
       - name: Record exact source commit
         id: source
