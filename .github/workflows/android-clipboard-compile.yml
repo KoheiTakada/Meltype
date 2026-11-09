@@ -26,8 +26,8 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
       - uses: gradle/actions/wrapper-validation@v4
-      - name: Compile app Kotlin (no Mozc/NativeAOT packaging)
+      - name: Compile app Kotlin without Mozc packaging artifacts
         working-directory: android
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon :app:compileDebugKotlin :app:testDebugUnitTest
+          ./gradlew --no-daemon :app:compileDebugKotlin :app:testDebugUnitTest -x :mozc:checkMozcArtifacts
