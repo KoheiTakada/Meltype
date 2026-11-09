@@ -2,7 +2,12 @@
 // Copyright (C) 2026 ninjin0802
 package io.github.ninjin0802.keyboard.app
 
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
 import android.graphics.Color
 import android.inputmethodservice.InputMethodService
 import android.os.Build
@@ -16,8 +21,13 @@ import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputContentInfo
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
+import android.util.TypedValue
 import android.view.Gravity
 import java.io.File
 import io.github.ninjin0802.keyboard.app.core.CoreInputAdapter
@@ -67,7 +77,15 @@ import io.github.ninjin0802.keyboard.engine.SessionConfig
 import io.github.ninjin0802.keyboard.engine.Update
 import io.github.ninjin0802.keyboard.mozc.MozcConverter
 import io.github.ninjin0802.keyboard.mozc.MozcEngine
+import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
+import io.github.ninjin0802.keyboard.app.clipboard.ClipboardCleanupJob
+import io.github.ninjin0802.keyboard.app.clipboard.ClipboardContentProvider
+import io.github.ninjin0802.keyboard.app.clipboard.ClipboardEditorActivity
+import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
+import io.github.ninjin0802.keyboard.app.clipboard.ClipboardPanelView
+import io.github.ninjin0802.keyboard.app.clipboard.ClipboardProcessing
+import io.github.ninjin0802.keyboard.app.clipboard.HistoryClip
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
@@ -157,6 +175,41 @@ class KeyboardService : InputMethodService(), KeyListener {
     private var candidateBar: CandidateBarView? = null
     private var flickPopup: FlickPopupView? = null
     private var emojiPanel: EmojiPanelView? = null
+    private var clipboardPanel: ClipboardPanelView? = null
+    private var clipboardBarContainer: View? = null
+    private var clipboardButton: View? = null
+
+    private val clipboardWorker = Executors.newSingleThreadExecutor()
+    private val clipboardStore by lazy { ClipboardHistoryStore(applicationContext) }
+    private var clipboardManager: ClipboardManager? = null
+    private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
+        if (policy.isPassword) return@OnPrimaryClipChangedListener
+        val clip = try { clipboardManager?.primaryClip } catch (_: SecurityException) { null }
+        clip?.let(::captureClipboard)
+    }
+
+    private fun captureClipboard(clip: ClipData) {
+        if (clipboardWorker.isShutdown || clipboardStore.isSensitive(clip)) return
+        clipboardWorker.execute {
+            try {
+                if (clipboardStore.capture(clip)) mainHandler.post { refreshClipboardPanel() }
+            } catch (error: Exception) {
+                Log.w(TAG, "Clipboard capture failed: " + error.javaClass.simpleName)
+            }
+        }
+    }
+
+    private fun refreshClipboardPanel() {
+        if (clipboardWorker.isShutdown || clipboardPanel?.visibility != View.VISIBLE || policy.isPassword) return
+        clipboardWorker.execute {
+            val clips = runCatching { clipboardStore.list() }.getOrElse { emptyList() }
+            mainHandler.post {
+                if (clipboardPanel?.visibility == View.VISIBLE && !policy.isPassword) {
+                    clipboardPanel?.display(clips)
+                }
+            }
+        }
+    }
     private val emojiRecents by lazy { EmojiRecentsStore(PrefsStore(this, "emoji")) }
 
     private var policy = FieldPolicy(LayoutId.KANA, convert = true, learn = true)
@@ -194,6 +247,10 @@ class KeyboardService : InputMethodService(), KeyListener {
     override fun onCreate() {
         super.onCreate()
         createdAtNanos = System.nanoTime()
+        clipboardManager = getSystemService(ClipboardManager::class.java)
+        clipboardManager?.addPrimaryClipChangedListener(clipboardListener)
+        ClipboardCleanupJob.ensureScheduled(this)
+        clipboardWorker.execute { clipboardStore.prune() }
         Settings(this).let {
             nav.choose(it.japaneseLayout, it.englishLayout)
             it.registerChangeListener(settingsListener)
@@ -237,6 +294,8 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onDestroy() {
+        clipboardManager?.removePrimaryClipChangedListener(clipboardListener)
+        clipboardWorker.shutdown()
         Settings(this).unregisterChangeListener(settingsListener)
         fieldGeneration++
         runner.cancelPending()
@@ -297,15 +356,40 @@ class KeyboardService : InputMethodService(), KeyListener {
         keyboardView = keys
         flickPopup = popup
         emojiPanel = emoji
+        val clipboard = ClipboardPanelView(this).apply {
+            visibility = View.GONE
+            onClose = ::closeClipboardPanel
+            onPick = ::pasteClipboardItem
+            onAction = ::clipboardAction
+        }
+        clipboardPanel = clipboard
         showLayout()
         val background = Palette.of(this).background
         styleNavigationBar(background)
         ImeGlassSurface.configureWindow(window?.window, this)
+        val density = resources.displayMetrics.density
+        fun dp(number: Int) = (number * density + 0.5f).toInt()
+        bar.setPadding(bar.paddingLeft, bar.paddingTop, dp(57), bar.paddingBottom)
+        val barContainer = FrameLayout(this).apply {
+            clipboardBarContainer = this
+            addView(bar, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+            addView(TextView(this@KeyboardService).apply {
+                text = "▤"
+                contentDescription = "クリップボード履歴"
+                gravity = Gravity.CENTER
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
+                setTextColor(Palette.of(this@KeyboardService).accent)
+                setOnClickListener { openClipboardPanel() }
+                clipboardButton = this
+            }, FrameLayout.LayoutParams(dp(50), dp(46), Gravity.RIGHT or Gravity.CENTER_VERTICAL))
+        }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(bar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(barContainer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(keys, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(emoji, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(clipboard, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(310)))
         }
         keyColumn = column
         return FrameLayout(this).apply {
@@ -414,6 +498,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         currentInputConnection?.finishComposingText()
         dropComposition()
         policy = fieldPolicy(info.inputType, info.imeOptions)
+        clipboardButton?.visibility = if (policy.isPassword) View.GONE else View.VISIBLE
         imeOptions = info.imeOptions
         selStart = info.initialSelStart
         selEnd = info.initialSelEnd
@@ -431,6 +516,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     override fun onFinishInputView(finishingInput: Boolean) {
         keyboardView?.cancelTouch()
         languagePopup.dismiss()
+        closeClipboardPanel()
         emojiPanel?.cancelTouch()
         dropComposition()
         super.onFinishInputView(finishingInput)
@@ -608,6 +694,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         val panel = emojiPanel ?: return false
         keyboardView?.cancelTouch()   // 絵文字キーから別のキーへ指を移していても、隠れるキーボードには入力させない
         // パスワードの欄では、覚えてある絵文字を見せない（spec 04・09）。
+        closeClipboardPanel()
         panel.open(nav.current, enterKind(imeOptions), policy.showsRecentEmoji, timeMs)
         swapEmojiPanel(panel, open = true)
         return true
@@ -622,8 +709,104 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     private fun swapEmojiPanel(panel: EmojiPanelView, open: Boolean) {
         panel.visibility = if (open) View.VISIBLE else View.GONE
-        candidateBar?.visibility = if (open) View.GONE else View.VISIBLE
+        clipboardBarContainer?.visibility = if (open) View.GONE else View.VISIBLE
         keyboardView?.visibility = if (open) View.GONE else View.VISIBLE
+    }
+
+
+    /** The history panel replaces the keyboard rather than appearing over the editor. */
+    private fun openClipboardPanel() {
+        if (policy.isPassword) return
+        commitComposing()
+        keyboardView?.cancelTouch()
+        closeEmojiPanel()
+        clipboardPanel?.visibility = View.VISIBLE
+        clipboardBarContainer?.visibility = View.GONE
+        keyboardView?.visibility = View.GONE
+        refreshClipboardPanel()
+    }
+
+    private fun closeClipboardPanel() {
+        clipboardPanel?.visibility = View.GONE
+        if (emojiPanel?.visibility != View.VISIBLE) {
+            clipboardBarContainer?.visibility = View.VISIBLE
+            keyboardView?.visibility = View.VISIBLE
+        }
+    }
+
+    private fun pasteClipboardItem(clip: HistoryClip) {
+        if (policy.isPassword) return
+        commitComposing()
+        if (!clip.isMedia) {
+            currentInputConnection?.commitText(clip.text, 1)
+            closeClipboardPanel()
+            return
+        }
+        val supported = currentInputEditorInfo?.contentMimeTypes.orEmpty()
+            .any { ClipDescription.compareMimeTypes(clip.mime, it) }
+        if (!supported) {
+            Toast.makeText(this, "この入力欄は画像やファイルの直接貼り付けに対応していません", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val content = InputContentInfo(
+            ClipboardContentProvider.uri(clip.id),
+            ClipDescription(clip.fileName ?: "Clipboard", arrayOf(clip.mime)),
+        )
+        val done = currentInputConnection?.commitContent(
+            content, InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null
+        ) == true
+        if (done) closeClipboardPanel()
+        else Toast.makeText(this, "貼り付けできませんでした", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun clipboardAction(clip: HistoryClip, action: String) {
+        if (policy.isPassword) return
+        when (action) {
+            "copy" -> {
+                val data = if (clip.isMedia) {
+                    ClipData.newUri(contentResolver, clip.fileName ?: "Clipboard",
+                        ClipboardContentProvider.uri(clip.id))
+                } else if (clip.html != null) {
+                    ClipData.newHtmlText("Meltype", clip.text, clip.html)
+                } else {
+                    ClipData.newPlainText("Meltype", clip.text)
+                }
+                clipboardManager?.setPrimaryClip(data)
+                closeClipboardPanel()
+            }
+            "delete" -> clipboardWorker.execute {
+                clipboardStore.delete(clip.id)
+                mainHandler.post { refreshClipboardPanel() }
+            }
+            "edit" -> {
+                startActivity(Intent(this, ClipboardEditorActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra(ClipboardEditorActivity.EXTRA_ID, clip.id))
+                closeClipboardPanel()
+            }
+            "translate" -> ClipboardProcessing.translate(clip.text) { result ->
+                saveProcessedClipboard(result)
+            }
+            "ocr" -> ClipboardProcessing.ocr(this, clip) { result ->
+                saveProcessedClipboard(result)
+            }
+        }
+    }
+
+    private fun saveProcessedClipboard(result: Result<String>) {
+        if (clipboardWorker.isShutdown) return
+        val text = result.getOrNull()
+        if (text == null) {
+            Toast.makeText(this, "処理できませんでした（言語・画像・モデルを確認）", Toast.LENGTH_SHORT).show()
+            return
+        }
+        clipboardWorker.execute {
+            clipboardStore.saveText(text)
+            mainHandler.post {
+                Toast.makeText(this, "結果をクリップボード履歴に保存しました", Toast.LENGTH_SHORT).show()
+                refreshClipboardPanel()
+            }
+        }
     }
 
     /** 絵文字の画面で選ばれた絵文字を入れる。「最近使ったもの」に足すかどうかは、入力欄の種類で決まる（spec 04・09）。 */
@@ -700,6 +883,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     /** いまの配列を出す。絵文字の画面が開いていれば閉じる。 */
     private fun showLayout() {
         closeEmojiPanel()
+        closeClipboardPanel()
         // 英字フリック配列は、どの欄でも変換せず、最後の1文字だけを持つ（spec 04・09）。配列を替える前に、未確定文字は確定してある。
         val direct = !policy.convert || nav.current == LayoutId.LATIN_FLICK
         if (session.config.direct != direct) session.config = session.config.copy(direct = direct)
