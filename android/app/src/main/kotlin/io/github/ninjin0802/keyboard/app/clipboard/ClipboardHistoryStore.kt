@@ -82,7 +82,8 @@ class ClipboardHistoryStore(private val app: Context) :
                 !html.isNullOrBlank() -> "rich"
                 else -> "text"
             }
-            val fingerprint = kind + ":" + sha256((plain + "\u0000" + (html ?: "")).toByteArray())
+            val content = plain.take(MAX_TEXT)
+            val fingerprint = kind + ":" + sha256((if (html == null) content else content + "\u0000" + html.take(MAX_TEXT)).toByteArray())
             insert(kind, plain.take(MAX_TEXT), html?.take(MAX_TEXT), "text/plain", null, null, fingerprint)
             saved = true
         }
