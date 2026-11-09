@@ -189,7 +189,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     private fun captureClipboard(clip: ClipData) {
-        if (clipboardStore.isSensitive(clip)) return
+        if (clipboardWorker.isShutdown || clipboardStore.isSensitive(clip)) return
         clipboardWorker.execute {
             try {
                 if (clipboardStore.capture(clip)) mainHandler.post { refreshClipboardPanel() }
@@ -200,7 +200,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     private fun refreshClipboardPanel() {
-        if (clipboardPanel?.visibility != View.VISIBLE || policy.isPassword) return
+        if (clipboardWorker.isShutdown || clipboardPanel?.visibility != View.VISIBLE || policy.isPassword) return
         clipboardWorker.execute {
             val clips = runCatching { clipboardStore.list() }.getOrElse { emptyList() }
             mainHandler.post {
