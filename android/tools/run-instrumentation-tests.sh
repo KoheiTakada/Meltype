@@ -53,7 +53,7 @@ run_group() {
 }
 # Native Core fixes its data directory for the lifetime of a process. The
 # bridge test uses a different directory, so run it in a fresh process.
-run_group 'io.github.ninjin0802.keyboard.app.core.LanguageDetectionDeviceTest,io.github.ninjin0802.keyboard.app.SettingsScreenDeviceTest,io.github.ninjin0802.keyboard.app.DeleteLengthDeviceTest,io.github.ninjin0802.keyboard.app.KeyboardViewTouchTest'
+run_group 'io.github.ninjin0802.keyboard.app.core.LanguageDetectionDeviceTest,io.github.ninjin0802.keyboard.app.SettingsScreenDeviceTest,io.github.ninjin0802.keyboard.app.DeleteLengthDeviceTest,io.github.ninjin0802.keyboard.app.KeyboardViewTouchTest,io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryDeviceTest'
 run_group 'io.github.ninjin0802.keyboard.app.core.MeltypeCoreBridgeDeviceTest'
 python3 "$ROOT/tools/instrumentation-report.py" \
   --log "$REPORT/instrumentation.log" \
@@ -63,6 +63,7 @@ python3 "$ROOT/tools/instrumentation-report.py" \
             "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/SettingsScreenDeviceTest.kt" \
             "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/DeleteLengthDeviceTest.kt" \
             "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/KeyboardViewTouchTest.kt" \
+            "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/clipboard/ClipboardHistoryDeviceTest.kt" \
             "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/core/MeltypeCoreBridgeDeviceTest.kt" \
   --output "$REPORT" || status=1
 exit "$status"
