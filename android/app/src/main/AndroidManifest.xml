@@ -7,6 +7,7 @@
         すべてのデータを外す規則も付ける（Android 12 以降は dataExtractionRules、それより前は fullBackupContent）。
     -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -37,6 +38,10 @@
         <activity
             android:name=".LicensesActivity"
             android:exported="false" />
+        <service
+            android:name=".clipboard.ClipboardCleanupJob"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="true" />
         <!-- BIND_INPUT_METHOD は、このサービスをシステムだけが呼べるようにする属性。権限の要求ではない。 -->
         <service
             android:name=".KeyboardService"
