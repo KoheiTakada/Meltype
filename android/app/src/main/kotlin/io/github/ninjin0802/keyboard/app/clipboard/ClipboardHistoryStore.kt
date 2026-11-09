@@ -59,10 +59,16 @@ class ClipboardHistoryStore(private val app: Context) :
         for (index in 0 until minOf(clip.itemCount, 8)) {
             val item = clip.getItemAt(index)
             val uri = item.uri
+            if (uri?.scheme == "https" || uri?.scheme == "http") {
+                saveText(uri.toString())
+                saved = true
+                continue
+            }
             val type = uri?.let { runCatching { app.contentResolver.getType(it) }.getOrNull() }
                 ?: (0 until clip.description.mimeTypeCount)
                     .map { clip.description.getMimeType(it) }
-                    .firstOrNull { it.startsWith("image/") || it.startsWith("application/") }
+                    .firstOrNull { it.startsWith("image/") || it.startsWith("application/") || it == "text/plain" }
+                ?: if (uri?.scheme == "content" || uri?.scheme == "file") "application/octet-stream" else null
             if (uri != null && type != null) {
                 val kind = if (type.startsWith("image/")) "image" else "file"
                 val name = uri.lastPathSegment?.takeLast(100) ?: kind
