@@ -15,7 +15,24 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: swiftshader-default
+            tests: ''
+            gpu: '-gpu swiftshader_indirect'
+          - label: swiftshader-no-readcolorbufferdma
+            tests: run-tests
+            gpu: '-gpu swiftshader_indirect -feature -ReadColorBufferDma'
+          - label: swangle
+            tests: run-tests
+            gpu: '-gpu swangle_indirect'
+          - label: guest
+            tests: run-tests
+            gpu: '-gpu guest'
+    name: probe (${{ matrix.label }})
     steps:
       - uses: actions/checkout@v4
       - uses: android-actions/setup-android@v3
@@ -30,6 +47,15 @@ jobs:
       - run: |
           yes | sdkmanager --install 'cmdline-tools;latest' > /dev/null
           test -e /dev/kvm && sudo chmod 666 /dev/kvm || true
+      - if: matrix.label == 'swiftshader-default'
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          echo '--- stable channel android-37 images'
+          "$SDKM" --list --channel=0 2>/dev/null | grep 'system-images;android-37' | sort -u || true
+          echo '--- canary channel android-37 images'
+          "$SDKM" --list --channel=3 2>/dev/null | grep 'system-images;android-37' | sort -u || true
+          echo '--- emulator packages'
+          "$SDKM" --list --channel=3 2>/dev/null | grep -E '^ *emulator ' | sort -u || true
       - uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: '37.0'
@@ -40,11 +66,12 @@ jobs:
           disable-linux-hw-accel: false
           emulator-boot-timeout: 900
           disable-animations: true
+          emulator-options: -no-window ${{ matrix.gpu }} -no-snapshot -noaudio -no-boot-anim
           script: |
-            bash android/tools/probe-android17.sh
+            bash android/tools/probe-android17.sh ${{ matrix.label }} ${{ matrix.tests }}
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-17-probe
+          name: android-17-probe-${{ matrix.label }}
           path: android/build/qa/
           if-no-files-found: warn
