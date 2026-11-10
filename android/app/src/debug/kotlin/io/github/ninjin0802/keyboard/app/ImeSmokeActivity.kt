@@ -12,6 +12,8 @@ import android.widget.LinearLayout
 class ImeSmokeActivity : Activity() {
     lateinit var editor: EditText
         private set
+    lateinit var japaneseEditor: EditText
+        private set
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -23,10 +25,18 @@ class ImeSmokeActivity : Activity() {
             isFocusableInTouchMode = true
             textSize = 20f
         }
+        japaneseEditor = EditText(this).apply {
+            hint = "Japanese input smoke"
+            inputType = InputType.TYPE_CLASS_TEXT
+            setSingleLine(true)
+            isFocusableInTouchMode = true
+            textSize = 20f
+        }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 80, 24, 24)
             addView(editor, LinearLayout.LayoutParams(-1, -2))
+            addView(japaneseEditor, LinearLayout.LayoutParams(-1, -2))
         })
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
         editor.requestFocus()
