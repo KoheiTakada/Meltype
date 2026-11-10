@@ -82,6 +82,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardCleanupJob
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardContentProvider
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardEditorActivity
+import io.github.ninjin0802.keyboard.app.clipboard.ClipboardLinkPreviewLoader
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardPanelView
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardProcessing
@@ -390,6 +391,25 @@ class KeyboardService : InputMethodService(), KeyListener {
             addView(keys, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(emoji, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(clipboard, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(310)))
+        }
+        // Match the original candidate bar + key area, including foldable layouts.
+        // Do not remeasure from GONE views while the clipboard mode is open.
+        val updateClipboardHeight = {
+            if (clipboard.visibility != View.VISIBLE &&
+                barContainer.height > 0 && keys.height > 0) {
+                val target = barContainer.height + keys.height
+                val params = clipboard.layoutParams as? LinearLayout.LayoutParams
+                if (params != null && params.height != target) {
+                    params.height = target
+                    clipboard.layoutParams = params
+                }
+            }
+        }
+        barContainer.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            updateClipboardHeight()
+        }
+        keys.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            updateClipboardHeight()
         }
         keyColumn = column
         return FrameLayout(this).apply {
@@ -773,6 +793,20 @@ class KeyboardService : InputMethodService(), KeyListener {
                 }
                 clipboardManager?.setPrimaryClip(data)
                 closeClipboardPanel()
+            }
+            "clean" -> {
+                val normalized = ClipboardLinkPreviewLoader.stripParameters(clip.text)
+                if (clip.kind != "link" || normalized == clip.text) return
+                clipboardWorker.execute {
+                    if (!clipboardStore.edit(clip.id, normalized)) {
+                        clipboardStore.saveText(normalized)
+                    }
+                    mainHandler.post {
+                        clipboardManager?.setPrimaryClip(ClipData.newPlainText("Meltype", normalized))
+                        Toast.makeText(this, "パラメータを除去してコピーしました", Toast.LENGTH_SHORT).show()
+                        refreshClipboardPanel()
+                    }
+                }
             }
             "delete" -> clipboardWorker.execute {
                 clipboardStore.delete(clip.id)
