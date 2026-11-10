@@ -20,22 +20,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: canary-emulator
+          - label: directmem-comma
+            channel: stable
+            opts: '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature GLDirectMem,HasSharedSlotsHostMemoryAllocator'
+            nav: ''
+          - label: directmem-separate
+            channel: stable
+            opts: '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature GLDirectMem -feature HasSharedSlotsHostMemoryAllocator'
+            nav: ''
+          - label: directmem-canary
             channel: canary
-            opts: '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim'
+            opts: '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature GLDirectMem,HasSharedSlotsHostMemoryAllocator'
             nav: ''
-          - label: no-gldma
-            channel: stable
-            opts: '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature -GLDMA'
-            nav: ''
-          - label: no-gldma2
-            channel: stable
-            opts: '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature -GLDMA2'
-            nav: ''
-          - label: threebutton
-            channel: stable
-            opts: '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim'
-            nav: threebutton
     name: probe (${{ matrix.label }})
     steps:
       - uses: actions/checkout@v4
@@ -49,9 +45,10 @@ jobs:
           run-id: 42851632923
           github-token: ${{ github.token }}
       - run: |
+          rm -rf android/build/qa
           yes | sdkmanager --install 'cmdline-tools;latest' > /dev/null
           test -e /dev/kvm && sudo chmod 666 /dev/kvm || true
-      - if: matrix.label == 'canary-emulator'
+      - if: matrix.label == 'none'
         run: |
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           echo '--- stable channel android-37 images'
