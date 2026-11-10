@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.ninjin0802.keyboard.app.clipboard
 
+import android.content.Context
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.database.Cursor
@@ -62,7 +63,8 @@ class ClipboardContentProvider : ContentProvider() {
         throw UnsupportedOperationException("Read only")
 
     companion object {
-        fun uri(id: Long): Uri =
-            Uri.parse("content://" + ClipboardHistoryStore.CONTENT_AUTHORITY + "/" + id)
+        fun uri(context: Context, id: Long): Uri =
+            Uri.Builder().scheme("content").authority(context.packageName + ".clipboard")
+                .appendPath(id.toString()).build()
     }
 }
