@@ -62,6 +62,41 @@ class ClipboardHistoryDeviceTest {
         file.delete()
     }
 
+    @Test fun configurableRetentionDeletesOnlyExpiredEntries() {
+        val previous = ClipboardRetention.days(context)
+        try {
+            ClipboardRetention.setDays(context, 7)
+            val old = store.saveText("古いコピー")!!
+            val recent = store.saveText("新しいコピー")!!
+            store.writableDatabase.execSQL(
+                "UPDATE clips SET created_at = ? WHERE id = ?",
+                arrayOf(System.currentTimeMillis() - 8L * 24 * 60 * 60 * 1000, old)
+            )
+            store.prune()
+            assertNull(store.get(old))
+            assertNotNull(store.get(recent))
+            ClipboardRetention.setDays(context, 90)
+            assertEquals(90, ClipboardRetention.days(context))
+        } finally {
+            ClipboardRetention.setDays(context, previous)
+        }
+    }
+
+    @Test fun linkCleaningIsExplicitAndOgTagsAreParsed() {
+        val original = "https://example.com/articles/path?utm_source=copy&x=2#summary"
+        assertEquals("https://example.com/articles/path",
+            ClipboardLinkPreviewLoader.stripParameters(original))
+        assertEquals("https://example.com/articles/path",
+            ClipboardLinkPreviewLoader.stripParameters(
+                ClipboardLinkPreviewLoader.stripParameters(original)))
+        val meta = ClipboardLinkPreviewLoader.parseHtml(
+            "<html><head><meta content=\"Example headline\" property=\"og:title\">" +
+            "<meta property=\"og:image\" content=\"/thumb.jpg\"></head></html>"
+        )
+        assertEquals("Example headline", meta.title)
+        assertEquals("/thumb.jpg", meta.imageUrl)
+    }
+
     @Test fun sensitiveContentIsNotRecorded() {
         val clip = ClipData.newPlainText("secret", "123456")
         clip.description.extras = PersistableBundle().apply {
