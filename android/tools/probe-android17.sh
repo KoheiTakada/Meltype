@@ -21,8 +21,14 @@ if test "${PROBE_NAV:-}" = threebutton; then
   done
   run adb shell cmd overlay list com.android.internal.systemui.navbar.threebutton
 fi
-echo "=== idle for 120 s"
-sleep 120
+if test "${PROBE_NAV:-}" = show-ime; then
+  run adb shell settings put secure show_ime_with_hard_keyboard 1
+fi
+run adb shell settings get secure show_ime_with_hard_keyboard
+run adb shell "dumpsys input | grep -iE 'KeyboardType|Keyboard Layout|  [0-9]+: .*(keyboard|Keyboard|qwerty|goldfish|virtio)|Sources:' | head -n 40"
+run adb shell "dumpsys input_method | grep -iE 'hardKeyboard|HardKeyboard|mShowImeWithHardKeyboard|showImeWithHardKeyboard' | head"
+echo "=== idle for 60 s"
+sleep 60
 sf_aborts() { grep -a -c 'Fatal signal.*(surfaceflinger)' "$LOG"; }
 zygotes() { grep -a -c 'START com.android.internal.os.ZygoteInit' "$LOG"; }
 echo "idle: surfaceflinger aborts=$(sf_aborts) zygote starts=$(zygotes)"
@@ -35,6 +41,8 @@ if test "${2:-}" = run-tests; then
   echo "after tests: surfaceflinger aborts=$(sf_aborts) zygote starts=$(zygotes)"
   echo '--- fatal lines (whole run)'
   grep -a -E 'Fatal signal|Abort message|FATAL EXCEPTION|\*\*\* FATAL|Watchdog: \*\*\*|WATCHDOG KILLING|F DEBUG   : Cmdline|AndroidRuntime: (Process|java\.|	at |Caused)' "$LOG" | head -n 80
+  echo '--- IME tracker and IME service lines'
+  grep -a -E 'ImeTracker|InputMethodManagerService|InputMethodService|KeyboardService|ImeVisibility|IMS.*show|DefaultImeVisibility|onEvaluateInputViewShown' "$LOG" | grep -a -v ' V ' | tail -n 80
   echo '--- crash buffer'
   adb logcat -d -b crash 2>&1 | tail -n 60
 fi
