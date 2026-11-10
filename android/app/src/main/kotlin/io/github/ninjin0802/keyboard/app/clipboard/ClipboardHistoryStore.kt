@@ -12,7 +12,7 @@ import java.io.IOException
 import java.security.MessageDigest
 import java.util.UUID
 
-/** A clip is retained for exactly 30 days from its most recent copy. */
+/** A clip is retained for the configured duration from its most recent copy. */
 data class HistoryClip(
     val id: Long,
     val kind: String,
@@ -171,7 +171,7 @@ class ClipboardHistoryStore(private val app: Context) :
         readableDatabase.rawQuery(
             "SELECT id, kind, text, html, mime, file_name, stored_name, created_at " +
                 "FROM clips WHERE id = ? AND created_at >= ?",
-            arrayOf(id.toString(), (System.currentTimeMillis() - RETENTION_MS).toString()),
+            arrayOf(id.toString(), (System.currentTimeMillis() - ClipboardRetention.millis(app)).toString()),
         ).use { c ->
             if (!c.moveToFirst()) null else HistoryClip(
                 c.getLong(0), c.getString(1), c.getString(2), c.getString(3),
@@ -203,7 +203,7 @@ class ClipboardHistoryStore(private val app: Context) :
     /** Expired media are removed with the rows; no clipboard data is exported or backed up. */
     fun prune() {
         val db = writableDatabase
-        val cutoff = (System.currentTimeMillis() - RETENTION_MS).toString()
+        val cutoff = (System.currentTimeMillis() - ClipboardRetention.millis(app)).toString()
         db.rawQuery("SELECT stored_name FROM clips WHERE created_at < ?", arrayOf(cutoff)).use { c ->
             while (c.moveToNext()) c.getString(0)?.let { ownedFile(it)?.delete() }
         }
@@ -249,7 +249,6 @@ class ClipboardHistoryStore(private val app: Context) :
         const val RETENTION_MS = 30L * 24 * 60 * 60 * 1000
         const val MAX_TEXT = 200_000
         const val MAX_MEDIA_BYTES = 16L * 1024 * 1024
-        const val CONTENT_AUTHORITY = "app.meltype.keyboard.clipboard"
 
         private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
             .digest(bytes).joinToString("") { "%02x".format(it) }

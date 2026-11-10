@@ -12,26 +12,40 @@ import android.view.View
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
 import io.github.ninjin0802.keyboard.app.view.Palette
 import java.io.File
-import java.text.DateFormat
-import java.util.Date
+import java.net.URI
 
-/** A mode of the existing keyboard, not a floating overlay or a separate clipboard app. */
+/**
+ * The clipboard is another keyboard mode: no pop-up menus, no extra screen
+ * height, tap the card to paste, tap an icon to perform a secondary operation.
+ */
 class ClipboardPanelView(context: Context) : LinearLayout(context) {
     var onPick: ((HistoryClip) -> Unit)? = null
     var onAction: ((HistoryClip, String) -> Unit)? = null
     var onClose: (() -> Unit)? = null
 
-    private val scale = resources.displayMetrics.density
+    private val density = resources.displayMetrics.density
     private val colors = Palette.of(context)
-    private val cardList = LinearLayout(context).apply { orientation = VERTICAL }
-    private val count = TextView(context)
+    private val list = LinearLayout(context).apply { orientation = VERTICAL }
     private val filters = LinearLayout(context).apply { orientation = HORIZONTAL }
-    private var contents: List<HistoryClip> = emptyList()
+    private val scroll = ScrollView(context).apply {
+        isFillViewport = true
+        isVerticalScrollBarEnabled = false
+        addView(list, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        setOnScrollChangeListener { _, _, _, _, _ -> requestVisiblePreviews() }
+    }
+    private data class PreviewTarget(
+        val card: View,
+        val url: String,
+        val title: TextView,
+        val thumbnail: ImageView,
+        var requested: Boolean = false,
+    )
+    private val previews = ArrayList<PreviewTarget>()
+    private var clips: List<HistoryClip> = emptyList()
     private var filter = "all"
 
     init {
@@ -39,41 +53,32 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
         val heading = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(7), dp(10), dp(4))
+            setPadding(dp(14), dp(4), dp(8), dp(3))
+            addView(label("履歴", 16f, colors.text).apply {
+                typeface = android.graphics.Typeface.create("sans-serif-medium",
+                    android.graphics.Typeface.NORMAL)
+            }, LayoutParams(0, dp(37), 1f))
+            addView(ClipboardIconView(context, "close", colors.subText).apply {
+                contentDescription = "履歴を閉じる"
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onClose?.invoke() }
+            }, LayoutParams(dp(43), dp(37)))
         }
-        heading.addView(label("履歴", 17f, colors.text).apply {
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }, LayoutParams(0, dp(37), 1f))
-        heading.addView(count, LayoutParams(LayoutParams.WRAP_CONTENT, dp(37)).apply {
-            marginEnd = dp(16)
-        })
-        heading.addView(label("閉じる", 14f, colors.accent).apply {
-            gravity = Gravity.CENTER
-            setOnClickListener { onClose?.invoke() }
-            contentDescription = "クリップボード履歴を閉じる"
-        }, LayoutParams(dp(53), dp(37)))
-        addView(heading)
+        addView(heading, LayoutParams(LayoutParams.MATCH_PARENT, dp(44)))
 
-        val tabStrip = HorizontalScrollView(context).apply {
+        addView(HorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
             addView(filters, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
-        }
-        addView(tabStrip, LayoutParams(LayoutParams.MATCH_PARENT, dp(42)))
-        addView(ScrollView(context).apply {
-            isFillViewport = true
-            isVerticalScrollBarEnabled = false
-            addView(cardList, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-        }, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+        }, LayoutParams(LayoutParams.MATCH_PARENT, dp(39)))
+
+        addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
         renderTabs()
     }
 
-    fun display(clips: List<HistoryClip>) {
-        contents = clips
-        count.text = clips.size.toString() + "件 / 30日"
-        count.setTextColor(colors.subText)
-        count.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-        count.gravity = Gravity.CENTER
+    fun display(items: List<HistoryClip>) {
+        clips = items
         renderList()
     }
 
@@ -84,119 +89,225 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
             "rich" to "書式付き", "image" to "画像", "file" to "ファイル",
         )) {
             val active = filter == id
-            val chip = label(name, 13f, if (active) Color.WHITE else colors.text).apply {
+            filters.addView(label(name, 12f,
+                if (active) colors.onAccent else colors.text).apply {
                 gravity = Gravity.CENTER
-                setPadding(dp(12), 0, dp(12), 0)
-                background = shape(if (active) colors.accent else 0x44FFFFFF, 12f)
+                setPadding(dp(13), 0, dp(13), 0)
+                background = shape(if (active) colors.accent else 0xC9FFFFFF.toInt(), 14f)
+                isClickable = true
                 setOnClickListener {
                     filter = id
                     renderTabs()
+                    scroll.scrollTo(0, 0)
                     renderList()
                 }
-            }
-            filters.addView(chip, LayoutParams(LayoutParams.WRAP_CONTENT, dp(32)).apply {
-                marginStart = dp(6)
+            }, LayoutParams(LayoutParams.WRAP_CONTENT, dp(29)).apply {
+                marginStart = dp(7)
             })
         }
     }
 
     private fun renderList() {
-        cardList.removeAllViews()
-        val visible = contents.filter { filter == "all" || it.kind == filter }
-        if (visible.isEmpty()) {
-            cardList.addView(label("履歴がありません", 14f, colors.subText).apply {
+        list.removeAllViews()
+        previews.clear()
+        val shown = clips.filter { filter == "all" || it.kind == filter }
+        if (shown.isEmpty()) {
+            list.addView(label("まだ履歴がありません", 13f, colors.subText).apply {
                 gravity = Gravity.CENTER
-            }, LayoutParams(LayoutParams.MATCH_PARENT, dp(100)))
+            }, LayoutParams(LayoutParams.MATCH_PARENT, dp(110)))
             return
         }
-        for (clip in visible) {
-            val tint = kindColor(clip.kind)
+        for (item in shown) {
+            val tint = kindColor(item.kind)
             val card = LinearLayout(context).apply {
-                orientation = HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(12), dp(10), dp(12), dp(10))
-                background = shape(0xCCFFFFFF.toInt(), 13f)
+                orientation = VERTICAL
+                setPadding(dp(11), dp(8), dp(11), dp(6))
+                background = shape(colors.key, 13f)
                 isClickable = true
                 isLongClickable = true
-                contentDescription = kindLabel(clip.kind) + "、" + clip.text.take(70)
-                setOnClickListener { onPick?.invoke(clip) }
-                setOnLongClickListener { showActions(this, clip); true }
-            }
-            card.addView(View(context).apply { background = shape(tint, 2f) },
-                LayoutParams(dp(4), LayoutParams.MATCH_PARENT).apply { marginEnd = dp(10) })
-            if (clip.kind == "image") {
-                val file = clip.storedName?.let { File(File(context.noBackupFilesDir, "clipboard-media"), it) }
-                if (file?.isFile == true) {
-                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeFile(file.path, options)
-                    val sample = maxOf(1, maxOf(options.outWidth / 160, options.outHeight / 110))
-                    val bitmap = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply {
-                        inSampleSize = sample
-                    })
-                    if (bitmap != null) card.addView(ImageView(context).apply {
-                        setImageBitmap(bitmap)
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                    }, LayoutParams(dp(64), dp(52)).apply { marginEnd = dp(10) })
+                contentDescription = kindLabel(item.kind) + "。" + item.text.take(60) +
+                    "。タップで貼り付け"
+                setOnClickListener { onPick?.invoke(item) }
+                setOnLongClickListener {
+                    val action = when (item.kind) {
+                        "image" -> "ocr"
+                        "file" -> "copy"
+                        else -> "edit"
+                    }
+                    onAction?.invoke(item, action)
+                    true
                 }
             }
-            val info = LinearLayout(context).apply { orientation = VERTICAL }
-            val first = label(kindLabel(clip.kind) + "  ·  " +
-                DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(clip.createdAt)),
-                11f, tint)
-            info.addView(first)
-            info.addView(label(clip.text.ifBlank { clip.fileName ?: "ファイル" }, 14f, colors.text).apply {
-                maxLines = 2
-                ellipsize = TextUtils.TruncateAt.END
-            }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(3)
-            })
-            card.addView(info, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-            card.addView(label("⋯", 22f, colors.subText).apply {
-                gravity = Gravity.CENTER
-                contentDescription = "追加操作"
-                setOnClickListener { showActions(this, clip) }
-            }, LayoutParams(dp(38), dp(48)))
-            cardList.addView(card, LayoutParams(LayoutParams.MATCH_PARENT, dp(82)).apply {
-                marginStart = dp(10)
-                marginEnd = dp(10)
-                bottomMargin = dp(7)
-            })
-        }
-    }
-
-    private fun showActions(anchor: View, clip: HistoryClip) {
-        val menu = PopupMenu(context, anchor)
-        menu.menu.add(0, 1, 0, "貼り付け")
-        menu.menu.add(0, 2, 1, "コピー")
-        if (!clip.isMedia) {
-            menu.menu.add(0, 3, 2, "編集")
-            menu.menu.add(0, 4, 3, "翻訳")
-        }
-        if (clip.kind == "image") menu.menu.add(0, 5, 4, "OCR（文字認識）")
-        menu.menu.add(0, 6, 5, "削除")
-        menu.setOnMenuItemClickListener {
-            val action = when (it.itemId) {
-                1 -> "paste"; 2 -> "copy"; 3 -> "edit"
-                4 -> "translate"; 5 -> "ocr"; 6 -> "delete"
-                else -> return@setOnMenuItemClickListener false
+            val metadata = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(ClipboardIconView(context, item.kind, tint),
+                    LayoutParams(dp(24), dp(24)))
+                addView(label(relativeTime(item.createdAt), 11f, colors.subText),
+                    LayoutParams(LayoutParams.WRAP_CONTENT, dp(24)).apply {
+                        marginStart = dp(5)
+                    })
             }
-            if (action == "paste") onPick?.invoke(clip) else onAction?.invoke(clip, action)
-            true
+            card.addView(metadata, LayoutParams(LayoutParams.MATCH_PARENT, dp(24)))
+
+            when (item.kind) {
+                "image" -> drawImage(card, item)
+                "link" -> drawLink(card, item)
+                "file" -> drawFile(card, item)
+                else -> drawText(card, item)
+            }
+
+            val actions = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                val buttons = ArrayList<Pair<String, String>>()
+                buttons += "copy" to "コピー"
+                if (!item.isMedia) {
+                    buttons += "edit" to "編集"
+                    buttons += "translate" to "翻訳"
+                }
+                if (item.kind == "image") buttons += "ocr" to "OCR"
+                if (item.kind == "link" &&
+                    ClipboardLinkPreviewLoader.stripParameters(item.text) != item.text) {
+                    buttons += "clean" to "URLのパラメータを除去"
+                }
+                buttons += "delete" to "削除"
+                for ((action, title) in buttons) {
+                    addView(ClipboardIconView(context, action,
+                        if (action == "delete") colors.subText else colors.accent).apply {
+                        contentDescription = title
+                        isClickable = true
+                        isFocusable = true
+                        setOnClickListener { onAction?.invoke(item, action) }
+                    }, LayoutParams(dp(40), dp(32)))
+                }
+            }
+            card.addView(actions, LayoutParams(LayoutParams.MATCH_PARENT, dp(35)).apply {
+                topMargin = dp(2)
+            })
+            list.addView(card, LayoutParams(LayoutParams.MATCH_PARENT,
+                LayoutParams.WRAP_CONTENT).apply {
+                marginStart = dp(9); marginEnd = dp(9); bottomMargin = dp(7)
+            })
         }
-        menu.show()
+        post { requestVisiblePreviews() }
     }
 
-    private fun label(value: String, sp: Float, color: Int) = TextView(context).apply {
+    private fun requestVisiblePreviews() {
+        val bounds = android.graphics.Rect()
+        for (preview in previews) {
+            if (preview.requested || !preview.card.getGlobalVisibleRect(bounds)) continue
+            preview.requested = true
+            ClipboardLinkPreviewLoader.load(preview.url) { result ->
+                if (preview.card.parent != null) {
+                    result.title?.let { preview.title.text = it }
+                    result.image?.let { preview.thumbnail.setImageBitmap(it) }
+                }
+            }
+        }
+    }
+
+    private fun drawText(card: LinearLayout, clip: HistoryClip) {
+        card.addView(label(clip.text, 13.5f, colors.text).apply {
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+        }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(4)
+        })
+    }
+
+    private fun drawFile(card: LinearLayout, clip: HistoryClip) {
+        card.addView(label(clip.fileName ?: "ファイル", 13.5f, colors.text).apply {
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+        }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(5)
+        })
+    }
+
+    private fun drawImage(card: LinearLayout, clip: HistoryClip) {
+        val file = clip.storedName?.let {
+            File(File(context.noBackupFilesDir, "clipboard-media"), it)
+        }
+        val preview = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            adjustViewBounds = false
+            background = shape(0xFFF3F5F7.toInt(), 10f)
+            contentDescription = "クリップボードの画像"
+        }
+        if (file?.isFile == true) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.path, bounds)
+            var sample = 1
+            while (bounds.outWidth / sample > 800 || bounds.outHeight / sample > 400) sample *= 2
+            BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply {
+                inSampleSize = sample
+            })?.let(preview::setImageBitmap)
+        }
+        card.addView(preview, LayoutParams(LayoutParams.MATCH_PARENT, dp(112)).apply {
+            topMargin = dp(4)
+        })
+    }
+
+    private fun drawLink(card: LinearLayout, clip: HistoryClip) {
+        val link = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val thumbnail = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            background = shape(0xFFF3F5F7.toInt(), 9f)
+            contentDescription = "Webページのプレビュー画像"
+        }
+        link.addView(thumbnail, LayoutParams(dp(66), dp(60)).apply {
+            marginEnd = dp(10)
+        })
+        val copy = LinearLayout(context).apply { orientation = VERTICAL }
+        val domain = runCatching { URI(clip.text).host?.removePrefix("www.") }
+            .getOrNull().orEmpty().ifBlank { "Webリンク" }
+        val title = label(domain, 13f, colors.text).apply {
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+            typeface = android.graphics.Typeface.create("sans-serif-medium",
+                android.graphics.Typeface.NORMAL)
+        }
+        copy.addView(title)
+        copy.addView(label(clip.text, 11f, colors.subText).apply {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.MIDDLE
+        }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(4)
+        })
+        link.addView(copy, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        card.addView(link, LayoutParams(LayoutParams.MATCH_PARENT, dp(66)).apply {
+            topMargin = dp(4)
+        })
+        // Fetch only visible cards, including older links when the list scrolls.
+        previews += PreviewTarget(card, clip.text, title, thumbnail)
+    }
+
+    private fun relativeTime(timestamp: Long): String {
+        val seconds = ((System.currentTimeMillis() - timestamp).coerceAtLeast(0)) / 1000L
+        return when {
+            seconds < 60 -> "今"
+            seconds < 3600 -> (seconds / 60).toString() + "分前"
+            seconds < 86400 -> (seconds / 3600).toString() + "時間前"
+            seconds < 172800 -> "昨日"
+            else -> (seconds / 86400).toString() + "日前"
+        }
+    }
+
+    private fun label(value: String, size: Float, color: Int) = TextView(context).apply {
         text = value
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, size)
         setTextColor(color)
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, sp)
         gravity = Gravity.CENTER_VERTICAL
         includeFontPadding = true
     }
 
-    private fun shape(color: Int, radiusDp: Float) = GradientDrawable().apply {
+    private fun shape(color: Int, radius: Float) = GradientDrawable().apply {
         setColor(color)
-        cornerRadius = radiusDp * scale
+        cornerRadius = dpF(radius)
     }
 
     private fun kindColor(kind: String): Int = when (kind) {
@@ -208,9 +319,13 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
     }
 
     private fun kindLabel(kind: String): String = when (kind) {
-        "link" -> "リンク"; "image" -> "画像"; "file" -> "ファイル"
-        "rich" -> "書式付き"; else -> "テキスト"
+        "link" -> "リンク"
+        "image" -> "画像"
+        "file" -> "ファイル"
+        "rich" -> "書式付き"
+        else -> "テキスト"
     }
 
-    private fun dp(value: Int): Int = (value * scale + 0.5f).toInt()
+    private fun dpF(value: Float) = value * density
+    private fun dp(value: Int) = (value * density + 0.5f).toInt()
 }
