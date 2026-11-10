@@ -249,7 +249,6 @@ class ClipboardHistoryStore(private val app: Context) :
         const val RETENTION_MS = 30L * 24 * 60 * 60 * 1000
         const val MAX_TEXT = 200_000
         const val MAX_MEDIA_BYTES = 16L * 1024 * 1024
-        const val CONTENT_AUTHORITY = "app.meltype.keyboard.clipboard"
 
         private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
             .digest(bytes).joinToString("") { "%02x".format(it) }
