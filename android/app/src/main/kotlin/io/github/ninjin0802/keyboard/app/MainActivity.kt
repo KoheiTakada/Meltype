@@ -281,6 +281,24 @@ class MainActivity : Activity() {
             }.setNegativeButton(android.R.string.cancel, null).show()
     }
 
+    /**
+     * Always reachable from the launcher, even if InputMethodService fails to
+     * start. Never attempt to change DEFAULT_INPUT_METHOD ourselves: Android
+     * must remain in control of which installed keyboard is selected.
+     */
+    private fun showSystemKeyboardPicker() {
+        try {
+            (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
+                .showInputMethodPicker()
+        } catch (error: RuntimeException) {
+            startActivity(Intent(SystemSettings.ACTION_INPUT_METHOD_SETTINGS))
+        }
+    }
+
+    private fun showSystemKeyboardSettings() {
+        startActivity(Intent(SystemSettings.ACTION_INPUT_METHOD_SETTINGS))
+    }
+
     private fun setupStatus(): Int {
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         val id = ComponentName(this, KeyboardService::class.java).flattenToShortString()
@@ -368,6 +386,19 @@ class MainActivity : Activity() {
                 entry("Meltypeを選択する", "入力方法として有効にする", "⌨") {
                     (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
                 }
+            }
+        }
+        // Always visible: this Activity runs independently of the IME service.
+        // Users must be able to recover after a keyboard startup crash.
+        card(content, "緊急時の切り替え") {
+            entry("別のキーボードに切り替える",
+                "Meltypeが起動しなくてもAndroidの切替画面を開く", "⌨") {
+                showSystemKeyboardPicker()
+            }
+            divider()
+            entry("Androidのキーボード設定を開く",
+                "有効なキーボードの管理と切り替え", "⚙") {
+                showSystemKeyboardSettings()
             }
         }
         card(content) {
