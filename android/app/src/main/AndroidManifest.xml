@@ -32,7 +32,7 @@
             android:windowSoftInputMode="adjustResize" />
         <provider
             android:name=".clipboard.ClipboardContentProvider"
-            android:authorities="app.meltype.keyboard.clipboard"
+            android:authorities="${applicationId}.clipboard"
             android:exported="false"
             android:grantUriPermissions="true" />
         <activity
