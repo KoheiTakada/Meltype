@@ -254,10 +254,23 @@ class KeyboardService : InputMethodService(), KeyListener {
         super.onCreate()
         activeForSmokeTest = WeakReference(this)
         createdAtNanos = System.nanoTime()
-        clipboardManager = getSystemService(ClipboardManager::class.java)
-        clipboardManager?.addPrimaryClipChangedListener(clipboardListener)
-        ClipboardCleanupJob.ensureScheduled(this)
-        clipboardWorker.execute { clipboardStore.prune() }
+        // Clipboard is optional. Never make the entire IME unavailable when
+        // a device/OEM rejects clipboard listeners or persisted JobScheduler jobs.
+        try {
+            clipboardManager = getSystemService(ClipboardManager::class.java)
+            clipboardManager?.addPrimaryClipChangedListener(clipboardListener)
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Clipboard listener unavailable; keyboard remains usable", error)
+        }
+        try {
+            ClipboardCleanupJob.ensureScheduled(this)
+            clipboardWorker.execute {
+                runCatching { clipboardStore.prune() }
+                    .onFailure { Log.w(TAG, "Clipboard history maintenance unavailable", it) }
+            }
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Clipboard maintenance could not start; keyboard remains usable", error)
+        }
         Settings(this).let {
             nav.choose(it.japaneseLayout, it.englishLayout)
             it.registerChangeListener(settingsListener)
@@ -302,7 +315,7 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     override fun onDestroy() {
         if (activeForSmokeTest?.get() === this) activeForSmokeTest = null
-        clipboardManager?.removePrimaryClipChangedListener(clipboardListener)
+        runCatching { clipboardManager?.removePrimaryClipChangedListener(clipboardListener) }
         clipboardWorker.shutdown()
         Settings(this).unregisterChangeListener(settingsListener)
         fieldGeneration++
