@@ -106,3 +106,47 @@ jobs:
             android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
           retention-days: 30
           if-no-files-found: warn
+
+  # The user's actual Android release is API 37. Reuse the exact APKs that
+  # passed the API 35 build, rather than rebuilding a different binary.
+  ime-smoke-android-17:
+    name: Android 17 — select, launch and type with Meltype IME
+    needs: android-source-build-and-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-37 build-tools;36.0.0'
+      - name: Download the exact APK and instrumentation APK built by Android QA
+        uses: actions/download-artifact@v4
+        with:
+          name: android-qa-report-and-debug-apk
+          path: android
+      - name: Confirm the downloaded APKs exist
+        run: |
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          test -s android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+      - name: Run real IME keyboard typing and launcher recovery on Android 17
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 37
+          target: google_apis
+          arch: x86_64
+          disk-size: 2048M
+          partition-size: 1024M
+          ram-size: 2048M
+          emulator-boot-timeout: 900
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            bash android/tools/run-instrumentation-tests.sh
+      - name: Upload Android 17 startup logs and touch-input test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-17-ime-smoke-report
+          path: android/build/qa/
+          retention-days: 30
+          if-no-files-found: warn
