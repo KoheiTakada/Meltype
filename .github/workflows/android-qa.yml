@@ -79,6 +79,7 @@ jobs:
           emulator-boot-timeout: 900
           disable-animations: true
           script: |
+            set -euo pipefail
             bash android/tools/run-instrumentation-tests.sh
             cd android && ./gradlew --no-daemon :mozc:connectedDebugAndroidTest
       - name: Display per-case report in Actions
