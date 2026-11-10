@@ -25,6 +25,8 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
+import io.github.ninjin0802.keyboard.app.clipboard.ClipboardRetention
+import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
 import io.github.ninjin0802.keyboard.app.layout.LayoutId
 import java.util.Locale
 
@@ -429,6 +431,22 @@ class MainActivity : Activity() {
                 entry("トグル判定時間", waitText(settings.toggleWaitMs)) { timing() }
             }
         }
+        card(content, "クリップボード") {
+            val days = ClipboardRetention.days(this@MainActivity)
+            entry("履歴の保存期間", days.toString() + "日") {
+                val options = ClipboardRetention.OPTIONS
+                choose("クリップボード履歴の保存期間", options.indexOf(days),
+                    options.map { count ->
+                        (count.toString() + "日") to {
+                            ClipboardRetention.setDays(this@MainActivity, count)
+                            Thread {
+                                ClipboardHistoryStore(applicationContext).prune()
+                            }.start()
+                        }
+                    })
+            }
+        }
+        hint(content, "保存期間を短くすると、期限を過ぎた履歴と画像は削除される。")
     }
 
     private fun timing() {
