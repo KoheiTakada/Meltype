@@ -22,6 +22,14 @@ class ClipboardHistoryDeviceTest {
         File(context.noBackupFilesDir, "clipboard-media").listFiles()?.forEach { it.delete() }
     }
 
+    @Test fun debugAppUsesIsolatedClipboardProvider() {
+        assertEquals("app.meltype.keyboard.debug", context.packageName)
+        val authority = ClipboardContentProvider.uri(context, 7L).authority
+        assertEquals(context.packageName + ".clipboard", authority)
+        assertEquals(context.packageName,
+            context.packageManager.resolveContentProvider(authority!!, 0)?.packageName)
+    }
+
     @Test fun textHistoryIsRetainedEditedAndDeduplicated() {
         assertTrue(store.capture(ClipData.newPlainText("sample", "こんにちは")))
         val id = store.list().single().id
