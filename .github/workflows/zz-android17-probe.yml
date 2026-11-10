@@ -20,21 +20,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: api37.0-google_apis
-            api: '37.0'
-            target: google_apis
+          - label: canary-emulator
+            channel: canary
+            opts: '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim'
             nav: ''
-          - label: api37.1-google_apis_ps16k
-            api: '37.1'
-            target: google_apis_ps16k
+          - label: no-gldma
+            channel: stable
+            opts: '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature -GLDMA'
             nav: ''
-          - label: api37.2-google_apis_ps16k
-            api: '37.2'
-            target: google_apis_ps16k
+          - label: no-gldma2
+            channel: stable
+            opts: '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature -GLDMA2'
             nav: ''
-          - label: api37.0-google_apis_ps16k-threebutton
-            api: '37.0'
-            target: google_apis_ps16k
+          - label: threebutton
+            channel: stable
+            opts: '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim'
             nav: threebutton
     name: probe (${{ matrix.label }})
     steps:
@@ -51,7 +51,7 @@ jobs:
       - run: |
           yes | sdkmanager --install 'cmdline-tools;latest' > /dev/null
           test -e /dev/kvm && sudo chmod 666 /dev/kvm || true
-      - if: matrix.label == 'api37.0-google_apis'
+      - if: matrix.label == 'canary-emulator'
         run: |
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           echo '--- stable channel android-37 images'
@@ -63,8 +63,10 @@ jobs:
           "$SDKM" --list --channel=0 2>/dev/null | grep -E '^ *emulator ' | sort -u || true
       - uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: ${{ matrix.api }}
-          target: ${{ matrix.target }}
+          api-level: '37.0'
+          target: google_apis_ps16k
+          channel: ${{ matrix.channel }}
+          emulator-options: ${{ matrix.opts }}
           arch: x86_64
           disk-size: 4096M
           ram-size: 4096M
