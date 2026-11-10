@@ -5,33 +5,47 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
-TEST="$ROOT/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
 PKG=app.meltype.keyboard.debug
+OUT="$ROOT/build/qa"; mkdir -p "$OUT"
 run() { echo "+ $*"; "$@" 2>&1 | head -n "${LINES_MAX:-40}"; echo "  (exit ${PIPESTATUS[0]})"; }
-for _ in $(seq 1 40); do
-  test "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 && adb shell pm path android >/dev/null 2>&1 && break
-  sleep 3
-done
-sleep 30
+ready() { test "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 && adb shell pm path android 2>/dev/null | grep -q '^package:'; }
+settle() { ok=0; for _ in $(seq 1 80); do if ready; then ok=$((ok+1)); else ok=0; fi; test "$ok" -ge 5 && return 0; sleep 3; done; return 1; }
+crashes() {
+  echo "--- crash evidence ($1)"
+  grep -a -E 'FATAL EXCEPTION|\*\*\* FATAL|Fatal signal|Abort message|Watchdog|WATCHDOG|system_server.*(died|crash)|Process system|lowmemorykiller|lmkd.*[Kk]ill|init: .*(zygote|system_server).*(exit|kill|restart)|Shutting down VM|AndroidRuntime: |DEBUG   : (pid|signal|Abort|Cmdline|backtrace|    #0[0-9])|16 ?[Kk][Bb]|page size|PageSize|dex2oat.*(fail|abort|crash)|No space left|INSTALL_FAILED' "$2" | grep -v 'adbd service requested' | tail -n "${3:-70}"
+}
+settle; echo "settled: $?"
 run adb shell getprop ro.build.version.release
-run adb shell getprop ro.build.version.sdk
-run adb shell getprop ro.product.model
-run adb shell getprop ro.fw.mu.headless_system_user
-run adb shell am get-current-user
-CUR="$(adb shell am get-current-user 2>/dev/null | tr -d '\r')"
+run adb shell getprop ro.build.fingerprint
+run adb shell "df -h /data | tail -n 1"
+run adb shell "cat /proc/meminfo | head -n 3"
+run adb shell "getconf PAGE_SIZE"
 run adb shell pm list users
+adb logcat -c || true
+adb logcat -b all -v threadtime > "$OUT/probe-logcat-1.txt" 2>&1 &
+LC=$!
+sleep 2
+echo '=== install 1: streamed'
 run adb install -r "$APP"
-run adb install -r "$TEST"
-for u in 0 "$CUR"; do
-  run adb shell "pm list packages --user $u | grep -i meltype"
-  run adb shell pm path --user "$u" "$PKG"
-  run adb shell cmd package resolve-activity --brief --user "$u" -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG"
-  run adb shell am start -W --user "$u" -n "$PKG/io.github.ninjin0802.keyboard.app.MainActivity"
-  run adb shell ime list -a -s --user "$u"
-done
-run adb shell "dumpsys package $PKG | grep -E 'User [0-9]+:|versionName|installed=|pkgFlags|codePath'"
-LINES_MAX=60 run adb shell "dumpsys package $PKG | grep -n -A14 'Activity Resolver Table'"
+sleep 20
+kill "$LC" 2>/dev/null || true
+crashes 'after streamed install' "$OUT/probe-logcat-1.txt"
+echo "logcat lines: $(wc -l < "$OUT/probe-logcat-1.txt")"
+settle; echo "settled: $?"
+run adb shell pm path "$PKG"
+adb logcat -b all -v threadtime > "$OUT/probe-logcat-2.txt" 2>&1 &
+LC=$!
+sleep 2
+echo '=== install 2: push then pm install'
+run adb push "$APP" /data/local/tmp/app.apk
+run adb shell pm install -r -t /data/local/tmp/app.apk
+sleep 20
+run adb shell pm path "$PKG"
 run adb shell am start -W -n "$PKG/io.github.ninjin0802.keyboard.app.MainActivity"
-run adb shell am start -W -n "$PKG/.MainActivity"
-LINES_MAX=40 run adb shell "logcat -d -t 400 | grep -iE 'meltype|ActivityTaskManager|PackageManager' | tail -n 40"
+sleep 10
+kill "$LC" 2>/dev/null || true
+crashes 'after pm install and start' "$OUT/probe-logcat-2.txt"
+settle; echo "settled: $?"
+run adb shell pm path "$PKG"
+run adb shell am start -W -n "$PKG/io.github.ninjin0802.keyboard.app.MainActivity"
 echo '=== probe done'

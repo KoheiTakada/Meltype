@@ -42,4 +42,9 @@ jobs:
           disable-animations: true
           script: |
             bash android/tools/probe-android17.sh
-            bash android/tools/run-instrumentation-tests.sh
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-17-probe
+          path: android/build/qa/
+          if-no-files-found: warn
