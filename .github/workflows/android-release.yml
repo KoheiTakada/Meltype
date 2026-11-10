@@ -53,7 +53,7 @@ jobs:
           raw = os.environ["KEY_BASE64"]
           candidates = [raw.strip(), "".join(raw.split())]
           candidates += re.findall(r"[A-Za-z0-9+/=]{1000,}", raw)
-          expected = "f3e1cc9f38d7ae462812baff63bd90f3562057d279509581be5c9fb8e2695fe8"
+          expected = "216d1faf265da5c0c212bc6985b620eb8d34f7d8aa982b240c69601ff9cf9d97"
           out = pathlib.Path(os.environ["RUNNER_TEMP"]) / "Meltype-signing.p12"
           good = None
           for item in candidates:
@@ -65,7 +65,7 @@ jobs:
                   good = decoded
                   break
           if good is None:
-              print("::error::Signing keystore secret does not match the generated key backup. Replace only the keystore Base64 secret with the complete 4664-character value.")
+              print("::error::Signing keystore secret does not match the generated key backup. Replace only the keystore Base64 secret with the complete 5732-character value.")
               sys.exit(2)
           out.write_bytes(good)
           print("Signing keystore checksum: MATCH")
