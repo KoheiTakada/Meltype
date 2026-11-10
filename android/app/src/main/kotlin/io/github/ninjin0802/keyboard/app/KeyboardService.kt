@@ -749,7 +749,7 @@ class KeyboardService : InputMethodService(), KeyListener {
             return
         }
         val content = InputContentInfo(
-            ClipboardContentProvider.uri(clip.id),
+            ClipboardContentProvider.uri(this, clip.id),
             ClipDescription(clip.fileName ?: "Clipboard", arrayOf(clip.mime)),
         )
         val done = currentInputConnection?.commitContent(
@@ -765,7 +765,7 @@ class KeyboardService : InputMethodService(), KeyListener {
             "copy" -> {
                 val data = if (clip.isMedia) {
                     ClipData.newUri(contentResolver, clip.fileName ?: "Clipboard",
-                        ClipboardContentProvider.uri(clip.id))
+                        ClipboardContentProvider.uri(this, clip.id))
                 } else if (clip.html != null) {
                     ClipData.newHtmlText("Meltype", clip.text, clip.html)
                 } else {
