@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.MotionEvent
+import android.view.InputDevice
 import android.view.inputmethod.InputMethodManager
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.ninjin0802.keyboard.app.layout.KeyAction
@@ -78,6 +79,8 @@ class ImeLaunchDeviceTest {
                 val clock = SystemClock.uptimeMillis()
                 val down = MotionEvent.obtain(clock, clock, MotionEvent.ACTION_DOWN, x, y, 0)
                 val up = MotionEvent.obtain(clock, clock + 55, MotionEvent.ACTION_UP, x, y, 0)
+                down.source = InputDevice.SOURCE_TOUCHSCREEN
+                up.source = InputDevice.SOURCE_TOUCHSCREEN
                 try {
                     assertTrue("Touch DOWN not delivered to IME", instrumentation.uiAutomation
                         .injectInputEvent(down, true))
