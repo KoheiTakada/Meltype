@@ -31,6 +31,20 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
     private val colors = Palette.of(context)
     private val list = LinearLayout(context).apply { orientation = VERTICAL }
     private val filters = LinearLayout(context).apply { orientation = HORIZONTAL }
+    private val scroll = ScrollView(context).apply {
+        isFillViewport = true
+        isVerticalScrollBarEnabled = false
+        addView(list, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        setOnScrollChangeListener { _, _, _, _, _ -> requestVisiblePreviews() }
+    }
+    private data class PreviewTarget(
+        val card: View,
+        val url: String,
+        val title: TextView,
+        val thumbnail: ImageView,
+        var requested: Boolean = false,
+    )
+    private val previews = ArrayList<PreviewTarget>()
     private var clips: List<HistoryClip> = emptyList()
     private var filter = "all"
 
@@ -59,11 +73,7 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
             addView(filters, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         }, LayoutParams(LayoutParams.MATCH_PARENT, dp(39)))
 
-        addView(ScrollView(context).apply {
-            isFillViewport = true
-            isVerticalScrollBarEnabled = false
-            addView(list, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-        }, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+        addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
         renderTabs()
     }
 
@@ -88,6 +98,7 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
                 setOnClickListener {
                     filter = id
                     renderTabs()
+                    scroll.scrollTo(0, 0)
                     renderList()
                 }
             }, LayoutParams(LayoutParams.WRAP_CONTENT, dp(29)).apply {
@@ -98,6 +109,7 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
 
     private fun renderList() {
         list.removeAllViews()
+        previews.clear()
         val shown = clips.filter { filter == "all" || it.kind == filter }
         if (shown.isEmpty()) {
             list.addView(label("まだ履歴がありません", 13f, colors.subText).apply {
@@ -105,7 +117,7 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
             }, LayoutParams(LayoutParams.MATCH_PARENT, dp(110)))
             return
         }
-        for ((index, item) in shown.withIndex()) {
+        for (item in shown) {
             val tint = kindColor(item.kind)
             val card = LinearLayout(context).apply {
                 orientation = VERTICAL
@@ -140,7 +152,7 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
 
             when (item.kind) {
                 "image" -> drawImage(card, item)
-                "link" -> drawLink(card, item, index)
+                "link" -> drawLink(card, item)
                 "file" -> drawFile(card, item)
                 else -> drawText(card, item)
             }
@@ -177,6 +189,21 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
                 LayoutParams.WRAP_CONTENT).apply {
                 marginStart = dp(9); marginEnd = dp(9); bottomMargin = dp(7)
             })
+        }
+        post { requestVisiblePreviews() }
+    }
+
+    private fun requestVisiblePreviews() {
+        val bounds = android.graphics.Rect()
+        for (preview in previews) {
+            if (preview.requested || !preview.card.getGlobalVisibleRect(bounds)) continue
+            preview.requested = true
+            ClipboardLinkPreviewLoader.load(preview.url) { result ->
+                if (preview.card.parent != null) {
+                    result.title?.let { preview.title.text = it }
+                    result.image?.let { preview.thumbnail.setImageBitmap(it) }
+                }
+            }
         }
     }
 
@@ -222,7 +249,7 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
         })
     }
 
-    private fun drawLink(card: LinearLayout, clip: HistoryClip, index: Int) {
+    private fun drawLink(card: LinearLayout, clip: HistoryClip) {
         val link = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -255,13 +282,8 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
         card.addView(link, LayoutParams(LayoutParams.MATCH_PARENT, dp(66)).apply {
             topMargin = dp(4)
         })
-        // Limit background web requests if hundreds of links are in the 30-day list.
-        if (index < 12) ClipboardLinkPreviewLoader.load(clip.text) { result ->
-            if (title.parent != null) {
-                result.title?.let { title.text = it }
-                result.image?.let { thumbnail.setImageBitmap(it) }
-            }
-        }
+        // Fetch only visible cards, including older links when the list scrolls.
+        previews += PreviewTarget(card, clip.text, title, thumbnail)
     }
 
     private fun relativeTime(timestamp: Long): String {
