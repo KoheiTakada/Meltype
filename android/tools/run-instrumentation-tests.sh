@@ -88,8 +88,10 @@ adb logcat -c || true
 run_group 'io.github.ninjin0802.keyboard.app.ImeLaunchDeviceTest'
 adb shell dumpsys input_method > "$REPORT/ime-window-state.txt" || true
 adb logcat -d -v threadtime -s AndroidRuntime:E > "$REPORT/ime-fatal-logcat.txt" || true
-if grep -q 'FATAL EXCEPTION' "$REPORT/ime-fatal-logcat.txt"; then
-  echo "IME smoke detected a fatal Android exception; see ime-fatal-logcat.txt" >&2
+# Android 17 emulator images can have unrelated Google-service crashes;
+# only a fatal crash in the keyboard/test app is a reason to reject its APK.
+if grep -Fq "Process: $PACKAGE," "$REPORT/ime-fatal-logcat.txt"; then
+  echo "IME smoke detected a fatal exception in $PACKAGE; see ime-fatal-logcat.txt" >&2
   status=1
 fi
 recover_ime
