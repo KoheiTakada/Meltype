@@ -321,7 +321,54 @@ class KeyboardService : InputMethodService(), KeyListener {
     /** 横向きでも入力欄を全画面にしない（アプリの画面を見ながら打てるようにする）。 */
     override fun onEvaluateFullscreenMode(): Boolean = false
 
-    override fun onCreateInputView(): View {
+    override fun onCreateInputView(): View = try {
+        buildNormalKeyboardView()
+    } catch (error: Exception) {
+        Log.e(TAG, "Cannot create keyboard UI; opening emergency input picker", error)
+        buildEmergencyKeyboardView()
+    } catch (error: LinkageError) {
+        Log.e(TAG, "Keyboard library failed to load; opening emergency input picker", error)
+        buildEmergencyKeyboardView()
+    }
+
+    private fun buildEmergencyKeyboardView(): View {
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+            setBackgroundColor(Palette.of(this@KeyboardService).background)
+            addView(TextView(this@KeyboardService).apply {
+                text = "Meltype を起動できませんでした"
+                textSize = 16f
+                setTextColor(Color.BLACK)
+            })
+            addView(TextView(this@KeyboardService).apply {
+                text = "別のキーボードに切り替える"
+                contentDescription = "別のキーボードに切り替える"
+                textSize = 16f
+                setTextColor(Color.BLUE)
+                setPadding(0, pad, 0, pad)
+                isClickable = true
+                setOnClickListener {
+                    (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                        .showInputMethodPicker()
+                }
+            })
+            addView(TextView(this@KeyboardService).apply {
+                text = "Android のキーボード設定"
+                contentDescription = "Android のキーボード設定"
+                textSize = 14f
+                setTextColor(Color.BLUE)
+                isClickable = true
+                setOnClickListener {
+                    startActivity(Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            })
+        }
+    }
+
+    private fun buildNormalKeyboardView(): View {
         val start = System.nanoTime()
         val bar = CandidateBarView(this).also { it.onPick = { index ->
             if (core != null && nav.current == LayoutId.ROMAJI) {
@@ -516,6 +563,18 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
+        try {
+            startNormalInputView(info, restarting)
+        } catch (error: Exception) {
+            Log.e(TAG, "Cannot start keyboard; switching to recovery input view", error)
+            setInputView(buildEmergencyKeyboardView())
+        } catch (error: LinkageError) {
+            Log.e(TAG, "Cannot start keyboard native dependency", error)
+            setInputView(buildEmergencyKeyboardView())
+        }
+    }
+
+    private fun startNormalInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         // Also refresh this on every editor focus, not only layout changes.
         keyboardView?.hapticEnabled = Settings(this).hapticEnabled
