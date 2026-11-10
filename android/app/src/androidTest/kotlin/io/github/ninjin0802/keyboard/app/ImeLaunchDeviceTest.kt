@@ -99,6 +99,51 @@ class ImeLaunchDeviceTest {
                 activity.editor.text.toString() == "asd"
             }
             assertEquals("asd", activity.editor.text.toString())
+
+            // Also exercise the normal Japanese-input route. A working email
+            // keyboard alone could conceal a failing Japanese/native path.
+            instrumentation.runOnMainSync {
+                activity.japaneseEditor.requestFocus()
+                (activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                    as InputMethodManager).showSoftInput(
+                        activity.japaneseEditor, InputMethodManager.SHOW_IMPLICIT)
+            }
+            waitUntil("Japanese text field opens the Japanese keyboard") {
+                val id = KeyboardService.activeForSmokeTest?.get()
+                    ?.activeKeysForSmokeTest()?.layout?.id
+                id == io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI ||
+                    id == io.github.ninjin0802.keyboard.app.layout.LayoutId.KANA
+            }
+            val japanese = KeyboardService.activeForSmokeTest?.get()
+                ?.activeKeysForSmokeTest() ?: throw AssertionError("Japanese keys not shown")
+            val key = japanese.layout.keys.firstOrNull {
+                when (val action = it.action) {
+                    is KeyAction.Romaji -> action.char == 'a'
+                    is KeyAction.Flick -> action.key.chars.firstOrNull() == 'あ'
+                    else -> false
+                }
+            } ?: throw AssertionError("No Japanese あ/A soft key")
+            val location = IntArray(2)
+            instrumentation.runOnMainSync { japanese.getLocationOnScreen(location) }
+            val x = location[0] +
+                japanese.width * ((key.col + key.width / 2f) / japanese.layout.columns)
+            val y = location[1] +
+                japanese.height * ((key.row + 0.5f) / japanese.layout.rows)
+            val clock = SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(clock, clock, MotionEvent.ACTION_DOWN, x, y, 0)
+            val up = MotionEvent.obtain(clock, clock + 55, MotionEvent.ACTION_UP, x, y, 0)
+            down.source = InputDevice.SOURCE_TOUCHSCREEN
+            up.source = InputDevice.SOURCE_TOUCHSCREEN
+            try {
+                assertTrue(instrumentation.uiAutomation.injectInputEvent(down, true))
+                assertTrue(instrumentation.uiAutomation.injectInputEvent(up, true))
+            } finally {
+                down.recycle()
+                up.recycle()
+            }
+            waitUntil("Japanese key must write composing text into the editor") {
+                activity.japaneseEditor.text.isNotEmpty()
+            }
         } finally {
             instrumentation.runOnMainSync { activity.finish() }
         }
