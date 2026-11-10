@@ -30,6 +30,7 @@ import android.widget.Toast
 import android.util.TypedValue
 import android.view.Gravity
 import java.io.File
+import java.lang.ref.WeakReference
 import io.github.ninjin0802.keyboard.app.core.CoreInputAdapter
 import io.github.ninjin0802.keyboard.app.core.CoreMozcCallbacks
 import io.github.ninjin0802.keyboard.app.core.MeltypeCoreSession
@@ -245,8 +246,13 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     private var createdAtNanos = 0L
 
+    /** Allows CI to inject genuine display touches into an activated IME. */
+    internal fun activeKeysForSmokeTest(): KeyboardView? = keyboardView?.takeIf { it.isShown && it.width > 0 && it.height > 0 }
+
+
     override fun onCreate() {
         super.onCreate()
+        activeForSmokeTest = WeakReference(this)
         createdAtNanos = System.nanoTime()
         clipboardManager = getSystemService(ClipboardManager::class.java)
         clipboardManager?.addPrimaryClipChangedListener(clipboardListener)
@@ -295,6 +301,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onDestroy() {
+        if (activeForSmokeTest?.get() === this) activeForSmokeTest = null
         clipboardManager?.removePrimaryClipChangedListener(clipboardListener)
         clipboardWorker.shutdown()
         Settings(this).unregisterChangeListener(settingsListener)
@@ -987,8 +994,9 @@ class KeyboardService : InputMethodService(), KeyListener {
         override fun learn(clauses: List<Clause>, context: String?) { mozc.get()?.learn(clauses, context) }
     }
 
-    private companion object {
-        const val TAG = "KeyboardService"
+    companion object {
+        @Volatile internal var activeForSmokeTest: WeakReference<KeyboardService>? = null
+        private const val TAG = "KeyboardService"
         const val CONTEXT_LENGTH = 20
     }
 }
