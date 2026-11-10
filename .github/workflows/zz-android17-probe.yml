@@ -20,18 +20,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: swiftshader-default
-            tests: ''
-            gpu: '-gpu swiftshader_indirect'
-          - label: swiftshader-no-readcolorbufferdma
-            tests: run-tests
-            gpu: '-gpu swiftshader_indirect -feature -ReadColorBufferDma'
-          - label: swangle
-            tests: run-tests
-            gpu: '-gpu swangle_indirect'
-          - label: guest
-            tests: run-tests
-            gpu: '-gpu guest'
+          - label: api37.0-google_apis
+            api: '37.0'
+            target: google_apis
+            nav: ''
+          - label: api37.1-google_apis_ps16k
+            api: '37.1'
+            target: google_apis_ps16k
+            nav: ''
+          - label: api37.2-google_apis_ps16k
+            api: '37.2'
+            target: google_apis_ps16k
+            nav: ''
+          - label: api37.0-google_apis_ps16k-threebutton
+            api: '37.0'
+            target: google_apis_ps16k
+            nav: threebutton
     name: probe (${{ matrix.label }})
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +51,7 @@ jobs:
       - run: |
           yes | sdkmanager --install 'cmdline-tools;latest' > /dev/null
           test -e /dev/kvm && sudo chmod 666 /dev/kvm || true
-      - if: matrix.label == 'swiftshader-default'
+      - if: matrix.label == 'api37.0-google_apis'
         run: |
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           echo '--- stable channel android-37 images'
@@ -56,19 +60,19 @@ jobs:
           "$SDKM" --list --channel=3 2>/dev/null | grep 'system-images;android-37' | sort -u || true
           echo '--- emulator packages'
           "$SDKM" --list --channel=3 2>/dev/null | grep -E '^ *emulator ' | sort -u || true
+          "$SDKM" --list --channel=0 2>/dev/null | grep -E '^ *emulator ' | sort -u || true
       - uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: '37.0'
-          target: google_apis_ps16k
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
           arch: x86_64
           disk-size: 4096M
           ram-size: 4096M
           disable-linux-hw-accel: false
           emulator-boot-timeout: 900
           disable-animations: true
-          emulator-options: -no-window ${{ matrix.gpu }} -no-snapshot -noaudio -no-boot-anim
           script: |
-            bash android/tools/probe-android17.sh ${{ matrix.label }} ${{ matrix.tests }}
+            PROBE_NAV=${{ matrix.nav }} bash android/tools/probe-android17.sh ${{ matrix.label }} run-tests
       - if: always()
         uses: actions/upload-artifact@v4
         with:
