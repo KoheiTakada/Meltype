@@ -3,7 +3,7 @@
 name: Android clipboard Kotlin compile
 on:
   push:
-    branches: [feat/android-clipboard-history-30d]
+    branches: [feat/android-clipboard-history-30d, personal/android-development, fix/android-isolated-test-apk]
     paths:
       - 'android/**'
       - '.github/workflows/android-clipboard-compile.yml'
