@@ -16,12 +16,10 @@ public sealed record UserWord(string Reading, string Word);
 /// importDirectory (Mac / Linux は データフォルダ/dictionaries) に置いた .plist (macOS の「ユーザ辞書」を書き出したもの) の語も使う (#40)。
 /// .plist の語は userdict.txt には書かず、置いたファイルをそのまま読む (ファイルを置き換えれば次の起動で入れ替わる)。
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1711:Identifiers should not have incorrect suffix", Justification = "日本語入力の辞書を表す既存の公開名。コレクション型を表すものではない。")]
 public sealed class UserDictionary
 {
-    /// <summary>他の辞書 (Microsoft IME・Google 日本語入力・macOS の plist) から取り込む読みの最小の長さ。</summary>
-    public const int MinReadingLength = 2;
-
-    /// <summary>自分で登録する (画面・userdict.txt) 読みの最小の長さ。</summary>
+    /// <summary>登録・取り込みできる読みの最小の長さ。</summary>
     public const int MinRegisteredReadingLength = 1;
 
     /// <summary>
@@ -217,6 +215,8 @@ public sealed class UserDictionary
             string? matched = null;
             for (var length = Math.Min(_maxReadingLength, kana.Length - i); length >= (kana.Length == 1 ? MinRegisteredReadingLength : MinSplitReadingLength); length--)
             {
+                // 拗音・小さい母音 (じょ・ふぁ) の途中では切らない (いしょくじょうたい が しょくじ|ょうたい で い食事ょうたい になっていた)
+                if (i + length < kana.Length && IsSmallKana(kana[i + length])) continue;
                 if (_byReading.ContainsKey(kana.Substring(i, length)))
                 {
                     matched = kana.Substring(i, length);
@@ -241,6 +241,9 @@ public sealed class UserDictionary
         if (plain.Length > 0) pieces.Add((plain.ToString(), null));
         return found ? pieces : null;
     }
+
+    /// <summary>前の文字と 1 つの音になる小さいかな (ゃ ゅ ょ ぁ ぃ ぅ ぇ ぉ ゎ)。</summary>
+    private static bool IsSmallKana(char c) => c is 'ゃ' or 'ゅ' or 'ょ' or 'ぁ' or 'ぃ' or 'ぅ' or 'ぇ' or 'ぉ' or 'ゎ';
 
     private void Changed()
     {
