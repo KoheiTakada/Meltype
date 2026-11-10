@@ -20,14 +20,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: directmem
+          - label: final
             channel: stable
             opts: '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature GLDirectMem,HasSharedSlotsHostMemoryAllocator'
             nav: ''
-          - label: directmem-show-ime-with-hw-kbd
-            channel: stable
-            opts: '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature GLDirectMem,HasSharedSlotsHostMemoryAllocator'
-            nav: show-ime
     name: probe (${{ matrix.label }})
     steps:
       - uses: actions/checkout@v4
