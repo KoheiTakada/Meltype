@@ -55,15 +55,55 @@ run_group() {
 # bridge test uses a different directory, so run it in a fresh process.
 run_group 'io.github.ninjin0802.keyboard.app.core.LanguageDetectionDeviceTest,io.github.ninjin0802.keyboard.app.SettingsScreenDeviceTest,io.github.ninjin0802.keyboard.app.DeleteLengthDeviceTest,io.github.ninjin0802.keyboard.app.KeyboardViewTouchTest,io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryDeviceTest'
 run_group 'io.github.ninjin0802.keyboard.app.core.MeltypeCoreBridgeDeviceTest'
+
+# A unit-tested KeyboardView is not proof that Android can activate the IME.
+# Select the APK's REAL IME, focus a debug-only EditText and tap its rendered
+# keys on-screen. An IME startup crash or failure to type must fail the build.
+IME="$PACKAGE/io.github.ninjin0802.keyboard.app.KeyboardService"
+previous_ime="$(adb shell settings get secure default_input_method | tr -d '\r')"
+other_ime="$(adb shell ime list -s | tr -d '\r' | grep -Fxv "$IME" | head -1 || true)"
+if test -z "$other_ime"; then
+  echo "No alternative input method is installed for recovery" >&2
+  exit 1
+fi
+recover_ime() {
+  # Never strand the CI emulator with a broken selected keyboard.
+  adb shell ime enable "$other_ime" >/dev/null || true
+  adb shell ime set "${previous_ime:-$other_ime}" >/dev/null ||
+    adb shell ime set "$other_ime" >/dev/null || true
+}
+trap recover_ime EXIT
+adb shell ime list -s | tr -d '\r' | grep -Fx "$IME" || {
+  echo "APK did not register its InputMethodService: $IME" >&2
+  exit 1
+}
+adb shell ime enable "$IME"
+adb shell ime set "$IME"
+selected_ime="$(adb shell settings get secure default_input_method | tr -d '\r')"
+test "$selected_ime" = "$IME" || {
+  echo "System did not select requested IME: $selected_ime" >&2
+  exit 1
+}
+adb logcat -c || true
+run_group 'io.github.ninjin0802.keyboard.app.ImeLaunchDeviceTest'
+adb shell dumpsys input_method > "$REPORT/ime-window-state.txt" || true
+adb logcat -d -v threadtime -s AndroidRuntime:E > "$REPORT/ime-fatal-logcat.txt" || true
+if grep -q 'FATAL EXCEPTION' "$REPORT/ime-fatal-logcat.txt"; then
+  echo "IME smoke detected a fatal Android exception; see ime-fatal-logcat.txt" >&2
+  status=1
+fi
+recover_ime
+trap - EXIT
 python3 "$ROOT/tools/instrumentation-report.py" \
   --log "$REPORT/instrumentation.log" \
   --device "$REPORT/device-info.txt" \
-  --expected-runs 2 \
+  --expected-runs 3 \
   --sources "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/core/LanguageDetectionDeviceTest.kt" \
             "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/SettingsScreenDeviceTest.kt" \
             "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/DeleteLengthDeviceTest.kt" \
             "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/KeyboardViewTouchTest.kt" \
             "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/clipboard/ClipboardHistoryDeviceTest.kt" \
             "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/core/MeltypeCoreBridgeDeviceTest.kt" \
+            "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/ImeLaunchDeviceTest.kt" \
   --output "$REPORT" || status=1
 exit "$status"
