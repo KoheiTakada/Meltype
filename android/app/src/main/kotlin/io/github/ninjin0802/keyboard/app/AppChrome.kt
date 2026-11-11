@@ -60,7 +60,7 @@ object AppChrome {
         textSize = 17f
         setPadding(dp(context, 16), dp(context, 13), dp(context, 16), dp(context, 13))
         hint = hintText
-        isSingleLine = !multiline
+        setSingleLine(!multiline)
         if (multiline) minLines = 4
         setText(value)
         setSelection(text.length)
@@ -158,7 +158,7 @@ class AppToggle(context: Context) : View(context), Checkable {
         invalidate()
         onToggle?.invoke(value)
     }
-    override fun toggle() { isChecked = !checked }
+    override fun toggle() { setChecked(!checked) }
     override fun performClick(): Boolean {
         toggle()
         super.performClick()
