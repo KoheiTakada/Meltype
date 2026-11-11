@@ -14,7 +14,7 @@ on:
       source_ref:
         description: Source branch or commit to build
         required: true
-        default: feat/android-bilingual-adaptive-ime
+        default: 25fcb7413f4791c0aa003027a0e2f6c040f87c75
         type: string
 
 permissions:
@@ -53,7 +53,7 @@ jobs:
           raw = os.environ["KEY_BASE64"]
           candidates = [raw.strip(), "".join(raw.split())]
           candidates += re.findall(r"[A-Za-z0-9+/=]{1000,}", raw)
-          expected = "f3e1cc9f38d7ae462812baff63bd90f3562057d279509581be5c9fb8e2695fe8"
+          expected = "216d1faf265da5c0c212bc6985b620eb8d34f7d8aa982b240c69601ff9cf9d97"
           out = pathlib.Path(os.environ["RUNNER_TEMP"]) / "Meltype-signing.p12"
           good = None
           for item in candidates:
@@ -65,7 +65,7 @@ jobs:
                   good = decoded
                   break
           if good is None:
-              print("::error::Signing keystore secret does not match the generated key backup. Replace only the keystore Base64 secret with the complete 4664-character value.")
+              print("::error::Signing keystore secret does not match the generated key backup. Replace only the keystore Base64 secret with the complete 5732-character value.")
               sys.exit(2)
           out.write_bytes(good)
           print("Signing keystore checksum: MATCH")
@@ -80,7 +80,7 @@ jobs:
           PY
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || 'feat/android-bilingual-adaptive-ime' }}
+          ref: ${{ inputs.source_ref || '25fcb7413f4791c0aa003027a0e2f6c040f87c75' }}
           fetch-depth: 0
       - name: Record exact source commit
         id: source
@@ -105,11 +105,18 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
       - uses: gradle/actions/wrapper-validation@v4
-      - name: Install Android NDK and native build prerequisites
+      - name: Check Android NDK and source-build prerequisites
         run: |
-          sudo apt-get update
-          sudo apt-get install -y patchelf curl git python3 build-essential
-          sdkmanager 'ndk;28.2.13676358'
+          set -euo pipefail
+          # The ubuntu-24.04 runner has these tools; avoid DNS-sensitive apt updates.
+          for tool in patchelf curl git python3 gcc g++ make; do
+            if ! command -v "$tool" >/dev/null; then
+              echo "::error::Missing required tool: $tool"; exit 1
+            fi
+          done
+          if ! test -d "$ANDROID_HOME/ndk/28.2.13676358"; then
+            sdkmanager 'ndk;28.2.13676358'
+          fi
       - name: Rebuild Mozc and NativeAOT from the selected source
         env:
           ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/28.2.13676358
@@ -156,7 +163,11 @@ jobs:
           if f"Signer #1 certificate SHA-256 digest: {expected}" not in actual:
               print("::error::APK certificate does not match the permanent signing key")
               sys.exit(1)
-          print("APK signer matches the permanent keystore: VERIFIED")
+          previous_release = "ed209ada26acaa690dd750d347d7a6fe8899b2f4ca895d2ed0a7c1524a145171"
+          if expected != previous_release:
+              print("::error::Signing certificate differs from existing v0.1.10/v0.1.11 releases")
+              sys.exit(1)
+          print("APK signer matches permanent key and prior releases: VERIFIED")
           PY
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging android/build/distribution/Meltype.apk | grep "package: name='app.meltype.keyboard' versionCode='$EXPECTED_VERSION_CODE'"
           sha256sum android/build/distribution/Meltype.apk > android/build/distribution/Meltype.sha256
@@ -175,5 +186,5 @@ jobs:
         run: |
           set -euo pipefail
           tag="android-v0.1.$VERSION_NUMBER"
-          printf 'Android test build from %s\nSigned with the permanent Meltype key.\nPackage ID: app.meltype.keyboard\nNative QA source: run current source built in release CI.\n' "$SOURCE_SHA" > android/build/distribution/RELEASE-NOTES.md
+          printf 'Meltype Android personal edition from %s\nSigned with the permanent Meltype key (matches v0.1.10/v0.1.11).\nPackage ID: app.meltype.keyboard\nSource verified in exact-SHA Android 15/17 QA before release.\n' "$SOURCE_SHA" > android/build/distribution/RELEASE-NOTES.md
           gh release create "$tag" android/build/distribution/Meltype.apk#Meltype.apk android/build/distribution/Meltype.sha256#Meltype.sha256 --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --title "Meltype Android 0.1.$VERSION_NUMBER" --notes-file android/build/distribution/RELEASE-NOTES.md --prerelease
