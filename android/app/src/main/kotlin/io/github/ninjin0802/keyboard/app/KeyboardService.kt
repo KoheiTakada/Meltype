@@ -92,6 +92,10 @@ import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardPanelView
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardProcessing
 import io.github.ninjin0802.keyboard.app.clipboard.HistoryClip
+import io.github.ninjin0802.keyboard.app.essentials.DictionaryAdapter
+import io.github.ninjin0802.keyboard.app.essentials.PersonalCompleter
+import io.github.ninjin0802.keyboard.app.essentials.PersonalCompletion
+import io.github.ninjin0802.keyboard.app.essentials.PhoneFieldContinuation
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
@@ -171,7 +175,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         return try {
             coreInput.emojiEnabled = Settings(this).emojiEnabled
             val consumed = coreInput.apply(instance.handle(event))
-            candidateBar?.show(coreInput.candidates, coreInput.selected)
+            displayCandidates(coreInput.candidates, coreInput.selected)
             consumed
         } catch (e: RuntimeException) {
             // InputMethodService must keep typing even when a native response fails.
@@ -262,6 +266,101 @@ class KeyboardService : InputMethodService(), KeyListener {
     private var clipboardBarContainer: View? = null
     private var clipboardButton: View? = null
 
+    private val dictionary by lazy { DictionaryAdapter(applicationContext) }
+    private val phoneFields = PhoneFieldContinuation()
+    private var suggestedPhonePart: String? = null
+    private var lastClipboard: HistoryClip? = null
+    private var baseCandidates: List<io.github.ninjin0802.keyboard.engine.Candidate> = emptyList()
+    private var baseSelected: Int? = null
+    private var inlineAction: (() -> Unit)? = null
+
+    /** Supplemental UI never enters the native Core, Mozc, or their candidate-index contract. */
+    private fun displayCandidates(
+        candidates: List<io.github.ninjin0802.keyboard.engine.Candidate>,
+        selected: Int?,
+    ) {
+        baseCandidates = candidates
+        baseSelected = selected
+        refreshInlineSuggestion()
+    }
+
+    private fun refreshInlineSuggestion() {
+        val bar = candidateBar ?: return
+        inlineAction = null
+        val privateField = policy.isPassword || fieldTraits.contains("Private") || !fieldReadable
+        val before = if (privateField) null
+            else currentInputConnection?.getTextBeforeCursor(160, 0)?.toString()
+        val entry: PersonalCompletion? = if (before.isNullOrEmpty()) null
+            else PersonalCompleter.suggest(before, dictionary.list())
+        val inline = when {
+            privateField || before == null -> null
+            entry != null -> {
+                inlineAction = { acceptPersonalCompletion(entry) }
+                entry.display
+            }
+            before.isEmpty() && !suggestedPhonePart.isNullOrBlank() -> {
+                val part = suggestedPhonePart!!
+                inlineAction = { acceptPhonePart(part) }
+                part
+            }
+            before.isEmpty() && baseCandidates.isEmpty() && lastClipboard != null &&
+                System.currentTimeMillis() - lastClipboard!!.createdAt in 0..90_000 -> {
+                val clip = lastClipboard!!
+                val accepted = !clip.isMedia || currentInputEditorInfo?.contentMimeTypes.orEmpty()
+                    .any { ClipDescription.compareMimeTypes(clip.mime, it) }
+                if (accepted) {
+                    inlineAction = { pasteClipboardItem(clip); refreshInlineSuggestion() }
+                    if (clip.kind == "image") "スクリーンショット" else clip.text.take(40)
+                } else null
+            }
+            else -> null
+        }
+        bar.show(baseCandidates, baseSelected, inline)
+    }
+
+    private fun acceptPersonalCompletion(suggestion: PersonalCompletion) {
+        // Avoid accidentally replacing altered or unrelated text.
+        commitComposing()
+        val connection = currentInputConnection ?: return
+        val before = connection.getTextBeforeCursor(suggestion.typed.length, 0)?.toString() ?: return
+        if (!before.endsWith(suggestion.typed, ignoreCase = suggestion.replacement.contains('@'))) return
+        connection.beginBatchEdit()
+        try {
+            connection.deleteSurroundingText(suggestion.typed.length, 0)
+            connection.commitText(suggestion.replacement, 1)
+        } finally { connection.endBatchEdit() }
+        caretWatch.lose()
+        suggestedPhonePart = null
+        displayCandidates(emptyList(), null)
+    }
+
+    private fun acceptPhonePart(part: String) {
+        if (currentInputConnection?.getTextBeforeCursor(1, 0)?.isNotEmpty() == true) return
+        currentInputConnection?.commitText(part, 1)
+        caretWatch.lose()
+        suggestedPhonePart = null
+        displayCandidates(emptyList(), null)
+    }
+
+    private fun updateLatestClipboardSuggestion() {
+        if (clipboardWorker.isShutdown) return
+        clipboardWorker.execute {
+            val newest = runCatching { clipboardStore.list().firstOrNull() }.getOrNull()
+            mainHandler.post {
+                lastClipboard = newest
+                refreshInlineSuggestion()
+            }
+        }
+    }
+
+    private fun rememberPhoneField() {
+        if (policy.isPassword || fieldTraits.contains("Private") || !fieldReadable) return
+        val value = currentInputConnection?.getTextBeforeCursor(24, 0)?.toString()?.trim() ?: return
+        if (value.matches(Regex("[0-9 -]{3,20}"))) {
+            phoneFields.exited(value, fieldApp, dictionary.list(), SystemClock.elapsedRealtime())
+        }
+    }
+
     private val clipboardWorker = Executors.newSingleThreadExecutor()
     private val clipboardStore by lazy { ClipboardHistoryStore(applicationContext) }
     private var clipboardManager: ClipboardManager? = null
@@ -275,7 +374,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         if (clipboardWorker.isShutdown || clipboardStore.isSensitive(clip)) return
         clipboardWorker.execute {
             try {
-                if (clipboardStore.capture(clip)) mainHandler.post { refreshClipboardPanel() }
+                if (clipboardStore.capture(clip)) mainHandler.post { refreshClipboardPanel(); updateLatestClipboardSuggestion() }
             } catch (error: Exception) {
                 Log.w(TAG, "Clipboard capture failed: " + error.javaClass.simpleName)
             }
@@ -373,7 +472,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         if (!settings.emojiEnabled) closeEmojiPanel()
         if (core != null) {
             coreInput.emojiEnabled = settings.emojiEnabled
-            candidateBar?.show(coreInput.candidates, coreInput.selected)
+            displayCandidates(coreInput.candidates, coreInput.selected)
         }
         showLayout()
     }
@@ -456,7 +555,7 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     private fun buildNormalKeyboardView(): View {
         val start = System.nanoTime()
-        val bar = CandidateBarView(this).also { it.onPick = { index ->
+        val bar = CandidateBarView(this).also { it.onInlinePick = { inlineAction?.invoke() }; it.onPick = { index ->
             val instance = core
             if (instance != null && nav.current == LayoutId.ROMAJI) {
                 val choice = coreInput.choices.getOrNull(index)
@@ -655,6 +754,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         // Restarted in the same editor without finishing it: the editor kept the composing text.
         if (coreInput.composing) leaveCore(focusLeft = false)
         policy = fieldPolicy(info.inputType, info.imeOptions)
+        suggestedPhonePart = phoneFields.next(info.packageName, SystemClock.elapsedRealtime(), restarting)
         clipboardButton?.visibility = if (policy.isPassword) View.GONE else View.VISIBLE
         imeOptions = info.imeOptions
         fieldTraits = buildList {
@@ -676,10 +776,13 @@ class KeyboardService : InputMethodService(), KeyListener {
             holdLast = policy.holdLast,
         )
         screens.fieldStarted(policy.layout)
+        displayCandidates(emptyList(), null)
+        updateLatestClipboardSuggestion()
         applyCurrentInsets()
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        rememberPhoneField()
         keyboardView?.cancelTouch()
         languagePopup.dismiss()
         closeClipboardPanel()
@@ -690,6 +793,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onFinishInput() {
+        rememberPhoneField()
         keyboardView?.cancelTouch()
         emojiPanel?.cancelTouch()
         dropComposition()
@@ -721,6 +825,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         }
         // Core の書き換えでないキャレットの移動は、Core に知らせる（変換中なら、出ている文字のまま確定させる）。
         if (!caretWatch.isOwn(newSelStart, newSelEnd, candidatesEnd, coreInput.composing)) caretMovedOutside()
+        refreshInlineSuggestion()
     }
 
     /**
@@ -733,7 +838,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         runner.cancelPending()
         bridge.forget()
         context.reset()
-        candidateBar?.show(emptyList(), null)
+        displayCandidates(emptyList(), null)
     }
 
     override fun onKey(action: KeyAction, direction: Direction, timeMs: Long) {
@@ -746,6 +851,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         } finally {
             connection?.endBatchEdit()
         }
+        refreshInlineSuggestion()
         if (PerfLog.enabled) {
             // key: 指を離した（または繰り返しが起きた）ときから、入力欄への書き込みを呼び終えるまで。
             PerfLog.event("key", (SystemClock.uptimeMillis() - timeMs) * 1000)
@@ -1116,7 +1222,7 @@ class KeyboardService : InputMethodService(), KeyListener {
             val choice = update.candidates.getOrNull(chosen)
             choice?.let(shown::indexOf)?.takeIf { it >= 0 }
         }
-        candidateBar?.show(shown, selected)
+        displayCandidates(shown, selected)
 
         val learn = update.learn
         if (learn != null && policy.learn) runner.learn(learn, context.text)
