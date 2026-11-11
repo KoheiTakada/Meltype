@@ -3,6 +3,8 @@ package io.github.ninjin0802.keyboard.app
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.Manifest
+import android.content.pm.PackageManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.res.Configuration
@@ -27,6 +29,7 @@ import android.widget.Switch
 import android.widget.TextView
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardRetention
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
+import io.github.ninjin0802.keyboard.app.clipboard.RecentScreenshotSource
 import io.github.ninjin0802.keyboard.app.layout.LayoutId
 import io.github.ninjin0802.keyboard.app.essentials.DictionaryActivity
 import java.util.Locale
@@ -153,6 +156,41 @@ class MainActivity : Activity() {
             systemBackCallback = null
         }
         super.onDestroy()
+    }
+
+    /** Screenshot access is opt-in and requested only from this dedicated settings row. */
+    private fun configureScreenshotSuggestions() {
+        val source = RecentScreenshotSource(this)
+        if (source.enabled()) {
+            source.setEnabled(false)
+            render()
+            return
+        }
+        if (source.hasFullImageAccess()) {
+            source.setEnabled(true)
+            render()
+            return
+        }
+        val permissions = when {
+            Build.VERSION.SDK_INT >= 34 -> arrayOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+            Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+            else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        requestPermissions(permissions, SCREENSHOT_ACCESS_REQUEST)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int,
+        permissions: Array<out String>, grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != SCREENSHOT_ACCESS_REQUEST) return
+        val source = RecentScreenshotSource(this)
+        // Do not infer permission from only the first requested grant: Android 14
+        // users can allow selected photos rather than future screenshots.
+        source.setEnabled(source.hasFullImageAccess())
+        render()
     }
 
     override fun onSaveInstanceState(state: Bundle) {
@@ -462,6 +500,12 @@ class MainActivity : Activity() {
             }
         }
         card(content, "クリップボード") {
+            val source = RecentScreenshotSource(this@MainActivity)
+            entry("最近のスクリーンショット",
+                if (source.enabled()) "画像候補を表示する（許可済み）"
+                else "写真へのアクセスを許可すると画像チップを表示できる",
+                symbol = "▧") { configureScreenshotSuggestions() }
+            divider()
             val days = ClipboardRetention.days(this@MainActivity)
             entry("履歴の保存期間", days.toString() + "日") {
                 val options = ClipboardRetention.OPTIONS
@@ -522,6 +566,7 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        private const val SCREENSHOT_ACCESS_REQUEST = 7214
         private const val WAIT_STEPS = 18
         private const val WAIT_BASE_MS = 300
         private const val WAIT_STEP_MS = 100
