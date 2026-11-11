@@ -9,7 +9,7 @@ import android.view.KeyEvent
 import android.view.WindowInsets
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Switch
+import io.github.ninjin0802.keyboard.app.AppToggle
 import android.widget.TextView
 import io.github.ninjin0802.keyboard.app.core.CoreConfig
 import io.github.ninjin0802.keyboard.app.core.coreDataDirectory
@@ -42,8 +42,8 @@ class SettingsScreenDeviceTest {
         return null
     }
 
-    private fun allSwitches(view: View): List<Switch> {
-        if (view is Switch) return listOf(view)
+    private fun allSwitches(view: View): List<AppToggle> {
+        if (view is AppToggle) return listOf(view)
         if (view !is ViewGroup) return emptyList()
         return (0 until view.childCount).flatMap { allSwitches(view.getChildAt(it)) }
     }
@@ -104,12 +104,12 @@ class SettingsScreenDeviceTest {
                 assertNotNull(findText(activity.window.decorView, "ライブ変換"))
                 val toggles = allSwitches(activity.window.decorView)
                 assertEquals(1, toggles.size)
-                assertEquals(previous, toggles[0].isChecked)
-                toggles[0].isChecked = !previous
+                assertEquals(previous, toggles[0].isChecked())
+                toggles[0].setChecked(!previous)
                 assertEquals(!previous, Settings(activity).liveConversionEnabled)
                 // Kept where the Core reads it (config.json), not in the keyboard's own preferences.
                 assertEquals(!previous, CoreConfig(coreDataDirectory(activity)).boolean(CoreConfig.LIVE_CONVERSION))
-                toggles[0].isChecked = previous
+                toggles[0].setChecked(previous)
                 assertEquals(previous, settings.liveConversionEnabled)
             }
         } finally {
