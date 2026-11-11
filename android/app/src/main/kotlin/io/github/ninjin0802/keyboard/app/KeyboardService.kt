@@ -32,7 +32,6 @@ import android.view.inputmethod.InputContentInfo
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import android.util.TypedValue
 import android.view.Gravity
 import io.github.ninjin0802.keyboard.app.core.CaretWatch
@@ -283,6 +282,18 @@ class KeyboardService : InputMethodService(), KeyListener {
     private var baseCandidates: List<io.github.ninjin0802.keyboard.engine.Candidate> = emptyList()
     private var baseSelected: Int? = null
     private var inlineAction: (() -> Unit)? = null
+    private var keyboardNotice: TextView? = null
+    private val dismissNotice = Runnable { keyboardNotice?.visibility = View.GONE }
+
+    /** Compact in-IME feedback instead of a system Toast popup. */
+    private fun showKeyboardNotice(message: String) {
+        val notice = keyboardNotice ?: return
+        notice.text = message
+        notice.visibility = View.VISIBLE
+        mainHandler.removeCallbacks(dismissNotice)
+        mainHandler.postDelayed(dismissNotice, 3000L)
+    }
+
 
     /** Supplemental UI never enters the native Core, Mozc, or their candidate-index contract. */
     private fun displayCandidates(
@@ -568,6 +579,7 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     override fun onDestroy() {
         stopScreenshotObserver()
+        mainHandler.removeCallbacks(dismissNotice)
         if (activeForSmokeTest?.get() === this) activeForSmokeTest = null
         clipboardManager?.removePrimaryClipChangedListener(clipboardListener)
         clipboardWorker.shutdown()
@@ -675,6 +687,18 @@ class KeyboardService : InputMethodService(), KeyListener {
             clipboardBarContainer = this
             addView(bar, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+            addView(TextView(this@KeyboardService).apply {
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                setPadding(dp(8), 0, dp(8), 0)
+                background = AppChrome.shape(this@KeyboardService, 0xFF3B3B3F.toInt(), 17)
+                visibility = View.GONE
+                isClickable = true
+                setOnClickListener { visibility = View.GONE }
+                keyboardNotice = this
+            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                dp(39), Gravity.CENTER))
             addView(TextView(this@KeyboardService).apply {
                 text = "▤"
                 contentDescription = "クリップボード履歴"
@@ -1123,7 +1147,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         val supported = currentInputEditorInfo?.contentMimeTypes.orEmpty()
             .any { ClipDescription.compareMimeTypes(clip.mime, it) }
         if (!supported) {
-            Toast.makeText(this, "この入力欄は画像やファイルの直接貼り付けに対応していません", Toast.LENGTH_SHORT).show()
+            showKeyboardNotice("この入力欄は画像を貼り付けられません")
             return
         }
         val content = InputContentInfo(
@@ -1134,7 +1158,7 @@ class KeyboardService : InputMethodService(), KeyListener {
             content, InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null
         ) == true
         if (done) closeClipboardPanel()
-        else Toast.makeText(this, "貼り付けできませんでした", Toast.LENGTH_SHORT).show()
+        else showKeyboardNotice("貼り付けできませんでした")
     }
 
     private fun clipboardAction(clip: HistoryClip, action: String) {
