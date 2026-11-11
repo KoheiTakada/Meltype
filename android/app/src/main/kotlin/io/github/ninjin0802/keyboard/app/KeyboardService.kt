@@ -64,6 +64,8 @@ import io.github.ninjin0802.keyboard.app.layout.Layouts
 import io.github.ninjin0802.keyboard.app.layout.withoutEmoji
 import io.github.ninjin0802.keyboard.app.layout.ScreenCoordinator
 import io.github.ninjin0802.keyboard.app.view.BottomInsets
+import io.github.ninjin0802.keyboard.app.view.BarSuggestion
+import io.github.ninjin0802.keyboard.app.view.SuggestionKind
 import io.github.ninjin0802.keyboard.app.view.CandidateBarView
 import io.github.ninjin0802.keyboard.app.view.FlickPopupView
 import io.github.ninjin0802.keyboard.app.view.KeyListener
@@ -296,19 +298,25 @@ class KeyboardService : InputMethodService(), KeyListener {
             else currentInputConnection?.getTextBeforeCursor(160, 0)?.toString()
         val entry: PersonalCompletion? = if (before.isNullOrEmpty()) null
             else PersonalCompleter.suggest(before, dictionary.list())
-        var thumbnail: Bitmap? = null
-        val inline = when {
+        val inline: BarSuggestion? = when {
             privateField || before == null -> null
             entry != null -> {
                 inlineAction = { acceptPersonalCompletion(entry) }
-                entry.display
+                val kind = when (entry.kind) {
+                    "email" -> SuggestionKind.EMAIL
+                    "address" -> SuggestionKind.ADDRESS
+                    else -> SuggestionKind.PHONE
+                }
+                BarSuggestion(entry.display, kind)
             }
             before.isEmpty() && !suggestedPhonePart.isNullOrBlank() -> {
                 val part = suggestedPhonePart!!
                 inlineAction = { acceptPhonePart(part) }
-                part
+                BarSuggestion(part, SuggestionKind.PHONE_SEGMENT)
             }
-            before.isEmpty() && baseCandidates.isEmpty() && lastClipboard != null &&
+            // Gboard's paste chip can appear after already committed text, not just
+            // in a completely empty editor. Suppress it while Core is composing.
+            baseCandidates.isEmpty() && !coreInput.composing && lastClipboard != null &&
                 System.currentTimeMillis() - lastClipboard!!.createdAt in 0..90_000 -> {
                 val clip = lastClipboard!!
                 val accepted = !clip.isMedia || currentInputEditorInfo?.contentMimeTypes.orEmpty()
@@ -316,14 +324,15 @@ class KeyboardService : InputMethodService(), KeyListener {
                 if (accepted) {
                     inlineAction = { pasteClipboardItem(clip); refreshInlineSuggestion() }
                     if (clip.kind == "image") {
-                        thumbnail = lastClipboardThumbnail
-                        "スクリーンショット"
-                    } else clip.text.take(40)
+                        BarSuggestion("Screenshot", SuggestionKind.CLIPBOARD_IMAGE, lastClipboardThumbnail)
+                    } else {
+                        BarSuggestion(clip.text.take(70), SuggestionKind.CLIPBOARD_TEXT)
+                    }
                 } else null
             }
             else -> null
         }
-        bar.show(baseCandidates, baseSelected, inline, thumbnail)
+        bar.show(baseCandidates, baseSelected, inline)
     }
 
     private fun acceptPersonalCompletion(suggestion: PersonalCompletion) {
