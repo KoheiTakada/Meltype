@@ -2,7 +2,7 @@
 package io.github.ninjin0802.keyboard.app.essentials
 
 /** An additional Android-only suggestion; native prediction and conversion remain authoritative. */
-data class PersonalCompletion(val display: String, val typed: String, val replacement: String)
+data class PersonalCompletion(val display: String, val typed: String, val replacement: String, val kind: String)
 
 object PersonalCompleter {
     private val prefectures = listOf("北海道","東京都","大阪府","京都府",
@@ -44,7 +44,7 @@ object PersonalCompleter {
                     if (!isMatch) continue
                     if (size * 10 > score) {
                         score = size * 10
-                        result = PersonalCompletion(value, typed, value)
+                        result = PersonalCompletion(value, typed, value, kind)
                     }
                     break
                 }
@@ -53,7 +53,7 @@ object PersonalCompleter {
             if (entry.reading.length >= 2 && before.endsWith(entry.reading, ignoreCase = true) &&
                 entry.reading.length * 10 + 100 > score) {
                 score = entry.reading.length * 10 + 100
-                result = PersonalCompletion(entry.word, entry.reading, entry.word)
+                result = PersonalCompletion(entry.word, entry.reading, entry.word, kind)
             }
         }
         return result
