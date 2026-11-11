@@ -14,11 +14,23 @@ data class UserWord(val reading: String, val word: String)
 class DictionaryAdapter(context: Context) {
     private val directory = coreDataDirectory(context.applicationContext)
     private val path = File(directory, "userdict.txt")
+    private var cachedMtime = Long.MIN_VALUE
+    private var cachedLength = -1L
+    private var cachedWords: List<UserWord> = emptyList()
 
-    fun list(): List<UserWord> = try {
-        parse(if (path.isFile) path.readText(Charsets.UTF_8) else "")
-    } catch (_: Exception) {
-        emptyList()
+    @Synchronized fun list(): List<UserWord> {
+        val mtime = if (path.isFile) path.lastModified() else 0L
+        val length = if (path.isFile) path.length() else 0L
+        if (mtime == cachedMtime && length == cachedLength) return cachedWords
+        val parsed = try {
+            parse(if (path.isFile) path.readText(Charsets.UTF_8) else "")
+        } catch (_: Exception) {
+            return cachedWords
+        }
+        cachedMtime = mtime
+        cachedLength = length
+        cachedWords = parsed
+        return parsed
     }
 
     @Synchronized fun add(reading: String, word: String): Boolean {
@@ -64,6 +76,7 @@ class DictionaryAdapter(context: Context) {
             } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
                 Files.move(temp.toPath(), path.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
+            cachedMtime = Long.MIN_VALUE
             true
         } catch (_: Exception) { false } finally { temp.delete() }
     }
