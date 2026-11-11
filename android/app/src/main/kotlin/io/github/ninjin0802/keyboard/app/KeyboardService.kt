@@ -269,6 +269,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     private val dictionary by lazy { DictionaryAdapter(applicationContext) }
     private val phoneFields = PhoneFieldContinuation()
     private var suggestedPhonePart: String? = null
+    private var phoneLeaveRecordedForField = false
     private var lastClipboard: HistoryClip? = null
     private var baseCandidates: List<io.github.ninjin0802.keyboard.engine.Candidate> = emptyList()
     private var baseSelected: Int? = null
@@ -354,6 +355,10 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     private fun rememberPhoneField() {
+        // Android may call both onFinishInputView and onFinishInput for the SAME editor.
+        // Advancing the phone continuation twice would clear the next segment.
+        if (phoneLeaveRecordedForField) return
+        phoneLeaveRecordedForField = true
         if (policy.isPassword || fieldTraits.contains("Private") || !fieldReadable) return
         val value = currentInputConnection?.getTextBeforeCursor(24, 0)?.toString()?.trim() ?: return
         if (value.matches(Regex("[0-9 -]{3,20}"))) {
@@ -754,6 +759,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         // Restarted in the same editor without finishing it: the editor kept the composing text.
         if (coreInput.composing) leaveCore(focusLeft = false)
         policy = fieldPolicy(info.inputType, info.imeOptions)
+        phoneLeaveRecordedForField = false
         suggestedPhonePart = phoneFields.next(info.packageName, SystemClock.elapsedRealtime(), restarting)
         clipboardButton?.visibility = if (policy.isPassword) View.GONE else View.VISIBLE
         imeOptions = info.imeOptions
