@@ -502,6 +502,162 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Ordinary words and sensitive personal completions share Core's userdict.txt only. */
+    private fun dictionaryPage(content: LinearLayout) {
+        title(content, "ユーザー辞書")
+        hint(content, "読みを入力すると、登録した単語を変換候補に表示します。")
+        card(content) {
+            entry("＋ 単語を登録", "読み・単語を設定", "＋") {
+                editingWord = null
+                navigate(Page.WORD_EDIT)
+            }
+        }
+        val list = userWords.list().filter { PersonalCompleter.kindOf(it.word) == null }
+        card(content, "登録した単語") {
+            if (list.isEmpty()) {
+                addView(text("登録した単語はありません", 14f, muted = true).apply {
+                    setPadding(dp(18), dp(18), dp(18), dp(18))
+                })
+            }
+            list.forEachIndexed { index, word ->
+                if (index > 0) divider()
+                entry(word.word, word.reading, "▤") {
+                    editingWord = word
+                    navigate(Page.WORD_EDIT)
+                }
+            }
+        }
+    }
+
+    private fun personalPage(content: LinearLayout) {
+        title(content, "個人情報")
+        hint(content, "メール・電話・住所の補完に使用します。保存先はユーザー辞書と共通で、端末内のみです。")
+        val all = userWords.list()
+        for ((kind, heading, prompt) in listOf(
+            Triple("email", "メールアドレス", "メールアドレスを登録"),
+            Triple("phone", "電話番号", "電話番号を登録"),
+            Triple("address", "住所", "住所を登録")
+        )) {
+            card(content, heading) {
+                entry("＋ " + prompt, "タップして登録", "＋") {
+                    personalKind = kind
+                    editingWord = null
+                    navigate(Page.PERSONAL_EDIT)
+                }
+                val items = all.filter { PersonalCompleter.kindOf(it.word) == kind }
+                items.forEach { word ->
+                    divider()
+                    entry(word.word, if (kind == "phone") "3-4-4分割にも対応" else null, "◉") {
+                        personalKind = kind
+                        editingWord = word
+                        navigate(Page.PERSONAL_EDIT)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun formError(context: LinearLayout): TextView =
+        AppChrome.text(this, "", 13f).apply {
+            setTextColor(AppChrome.colors(this@MainActivity).danger)
+            visibility = View.GONE
+            context.addView(this, LinearLayout.LayoutParams(-1, -2).apply {
+                topMargin = dp(10)
+            })
+        }
+
+    private fun wordEditor(content: LinearLayout) {
+        title(content, if (editingWord == null) "単語を登録" else "単語を編集")
+        val original = editingWord
+        val reading = AppChrome.input(this, "読み（例：めるたいぷ）", original?.reading.orEmpty())
+        val word = AppChrome.input(this, "単語（例：Meltype）", original?.word.orEmpty())
+        card(content, "読みと単語") {
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+            addView(text("読み", 13f, muted = true))
+            addView(reading, LinearLayout.LayoutParams(-1, dp(54)).apply {
+                topMargin = dp(8)
+                bottomMargin = dp(15)
+            })
+            addView(text("単語", 13f, muted = true))
+            addView(word, LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(8) })
+        }
+        val error = formError(content)
+        content.addView(AppChrome.action(this, "保存") {
+            val r = reading.text.toString()
+            val w = word.text.toString()
+            val saved = if (PersonalCompleter.kindOf(w) != null) false else
+                if (original == null) userWords.add(r, w) else userWords.edit(original, r, w)
+            if (saved) navigate(Page.DICTIONARY)
+            else {
+                error.text = if (PersonalCompleter.kindOf(w) != null)
+                    "メール・電話・住所は「個人情報」から登録してください。"
+                else "読みと単語を確認してください。"
+                error.visibility = View.VISIBLE
+            }
+        }, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) })
+        editFooter(content, original, Page.DICTIONARY)
+    }
+
+    private fun personalEditor(content: LinearLayout) {
+        val original = editingWord
+        val (name, placeholder, reading) = when (personalKind) {
+            "phone" -> Triple("電話番号", "09012345678", "でんわ")
+            "address" -> Triple("住所", "埼玉県朝霞市西弁財2-6-34-101", "じゅうしょ")
+            else -> Triple("メールアドレス", "your.name@example.com", "めあど")
+        }
+        title(content, if (original == null) name + "を登録" else name + "を編集")
+        val value = AppChrome.input(this, placeholder, original?.word.orEmpty()).apply {
+            inputType = when (personalKind) {
+                "phone" -> InputType.TYPE_CLASS_PHONE
+                "email" -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+                else -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS
+            }
+        }
+        card(content, name) {
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+            addView(text("登録内容", 13f, muted = true))
+            addView(value, LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(8) })
+        }
+        hint(content, when (personalKind) {
+            "email" -> "入力途中で補完します。候補は @ から先が小さい2行目になります。"
+            "phone" -> "フルサイズの1行候補。3-4-4に分かれた入力欄では続きを提示します。"
+            else -> "都道府県、市区町村、町名から補完します。町名以降を小さい2行目に表示します。"
+        })
+        val error = formError(content)
+        content.addView(AppChrome.action(this, "保存") {
+            val word = value.text.toString().trim()
+            val valid = PersonalCompleter.kindOf(word) == personalKind
+            val ok = valid && if (original == null) userWords.add(reading, word)
+                else userWords.edit(original, original.reading, word)
+            if (ok) navigate(Page.PERSONAL)
+            else {
+                error.text = "形式を確認してください。"
+                error.visibility = View.VISIBLE
+            }
+        }, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) })
+        editFooter(content, original, Page.PERSONAL)
+    }
+
+    /** Inline deletion with a second tap instead of an OS confirmation modal. */
+    private fun editFooter(content: LinearLayout, original: UserWord?, destination: Page) {
+        if (original != null) {
+            val delete = AppChrome.action(this, "削除", filled = false, destructive = true) {}
+            var confirm = false
+            delete.setOnClickListener {
+                if (!confirm) {
+                    confirm = true
+                    delete.text = "もう一度タップして削除"
+                } else if (userWords.delete(original)) navigate(destination)
+            }
+            content.addView(delete, LinearLayout.LayoutParams(-1, dp(48)).apply {
+                topMargin = dp(9)
+            })
+        }
+        content.addView(AppChrome.action(this, "キャンセル", filled = false) {
+            navigate(destination)
+        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(9) })
+    }
+
     private fun languages(content: LinearLayout) {
         title(content, "言語")
         card(content, "入力レイアウト") {
