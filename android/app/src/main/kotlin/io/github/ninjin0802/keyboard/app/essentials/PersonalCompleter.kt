@@ -13,7 +13,7 @@ object PersonalCompleter {
         "高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県")
 
     fun digits(text: String) = text.filter(Char::isDigit)
-    private fun typeOf(word: String): String? {
+    fun kindOf(word: String): String? {
         val d = digits(word)
         return when {
             word.matches(Regex("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) -> "email"
@@ -29,7 +29,7 @@ object PersonalCompleter {
         var result: PersonalCompletion? = null
         var score = -1
         for (entry in dictionary) {
-            val kind = typeOf(entry.word) ?: continue
+            val kind = kindOf(entry.word) ?: continue
             val variants = if (kind == "address") addressSuffixes(entry.word) else listOf(entry.word)
             for (value in variants) {
                 val max = minOf(before.length, value.length - 1, 72)
