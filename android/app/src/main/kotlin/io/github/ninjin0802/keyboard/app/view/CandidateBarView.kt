@@ -17,6 +17,7 @@ import io.github.ninjin0802.keyboard.engine.Candidate
 /** 変換候補を横に並べる。高さは候補が空でも変わらない（縦画面 44dp、横画面 36dp）。 */
 class CandidateBarView(context: Context) : HorizontalScrollView(context) {
     var onPick: ((index: Int) -> Unit)? = null
+    var onInlinePick: (() -> Unit)? = null
 
     private var palette = Palette.of(context)
     private val density = resources.displayMetrics.density
@@ -28,6 +29,7 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
     }
     private var shown: List<Candidate> = emptyList()
     private var shownSelected: Int? = null
+    private var inlineText: String? = null
 
     init {
         isHorizontalScrollBarEnabled = false
@@ -39,51 +41,65 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
         addView(row, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
     }
 
-    fun show(candidates: List<Candidate>, selected: Int?) {
-        if (candidates == shown && selected == shownSelected) return
-        if (candidates != shown) {
+    /** Supplemental Android suggestion is visually the third choice, never part of Core's candidate indices. */
+    fun show(candidates: List<Candidate>, selected: Int?, supplement: String? = null) {
+        if (candidates == shown && selected == shownSelected && supplement == inlineText) return
+        val changed = candidates != shown || supplement != inlineText
+        if (changed) {
             row.removeAllViews()
             val pad = (17 * density).toInt()
-            candidates.forEachIndexed { i, c ->
+            fun add(textValue: String, index: Int?) {
                 val tv = TextView(context).apply {
-                    text = c.text
-                    contentDescription = "変換候補: " + c.text
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+                    text = textValue
+                    contentDescription = if (index == null) "補完候補: " + textValue else "変換候補: " + textValue
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, if (index == null) 17f else 20f)
                     gravity = Gravity.CENTER
                     setPadding(pad, 0, pad, 0)
-                    minWidth = (64*density).toInt()
-                    // TextView.minWidth constrains text, but View.minimumWidth
-                    // establishes a touch target. Both are required.
-                    minimumWidth = (64*density).toInt()
+                    minWidth = (64 * density).toInt()
+                    minimumWidth = (64 * density).toInt()
+                    maxWidth = (210 * density).toInt()
                     isSingleLine = true
+                    ellipsize = android.text.TextUtils.TruncateAt.END
                     includeFontPadding = true
                     typeface = Typeface.DEFAULT
-                    setOnClickListener { onPick?.invoke(i) }
+                    setOnClickListener {
+                        if (index == null) onInlinePick?.invoke() else onPick?.invoke(index)
+                    }
                 }
                 val lp = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT)
-                lp.marginStart = (3*density).toInt()
-                lp.marginEnd = (3*density).toInt()
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT
+                ).apply { marginStart = (3 * density).toInt(); marginEnd = (3 * density).toInt() }
                 row.addView(tv, lp)
             }
-            // 並びが変わったら先頭から見せる（前の並びを横に送った位置のままだと、第一候補が隠れる）。
+            candidates.forEachIndexed { i, candidate ->
+                if (i == 2 && supplement != null) add(supplement, null)
+                add(candidate.text, i)
+            }
+            if (candidates.size < 3 && supplement != null) add(supplement, null)
             scrollTo(0, 0)
         }
         shown = candidates
         shownSelected = selected
+        inlineText = supplement
         for (i in 0 until row.childCount) {
+            val original = if (supplement == null) i
+                else when {
+                    i == minOf(2, candidates.size) -> null
+                    i > 2 -> i - 1
+                    else -> i
+                }
             val tv = row.getChildAt(i) as TextView
-            val on = i == selected
-            // Suggestions are text directly on the translucent IME surface.
-            // No white pills or selected-item background: touch targets remain
-            // full-size TextViews, independent of their visual background.
+            val on = original != null && original == selected
             tv.background = null
             tv.typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
             tv.setTextColor(if (on) palette.pill else palette.text)
         }
-        if (selected != null && selected in 0 until row.childCount) {
-            val target = row.getChildAt(selected)
-            post { scrollIntoView(target) }
+        if (selected != null) {
+            val i = if (supplement != null && selected >= 2) selected + 1 else selected
+            if (i in 0 until row.childCount) {
+                val target = row.getChildAt(i)
+                post { scrollIntoView(target) }
+            }
         }
     }
 
@@ -102,7 +118,7 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
         palette = Palette.of(context)
         val currentSelection = shownSelected
         shownSelected = null
-        show(shown, currentSelection)
+        show(shown, currentSelection, inlineText)
         requestLayout()
     }
 
