@@ -142,7 +142,7 @@ else
       selected_ime="$(adb shell settings get secure default_input_method | tr -d '\r')"
       if test "$selected_ime" = "$IME"; then
         adb logcat -c || true
-        run_group 'io.github.ninjin0802.keyboard.app.ImeLaunchDeviceTest'
+        run_group 'io.github.ninjin0802.keyboard.app.ImeLaunchDeviceTest,io.github.ninjin0802.keyboard.app.ClipboardPasteDeviceTest'
       else
         echo "Android did not select requested IME: $selected_ime" >&2
         status=1
@@ -182,5 +182,6 @@ python3 "$ROOT/tools/instrumentation-report.py" \
             "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/clipboard/ClipboardHistoryDeviceTest.kt" \
             "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/core/MeltypeCoreBridgeDeviceTest.kt" \
             "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/ImeLaunchDeviceTest.kt" \
+            "$ROOT/app/src/androidTest/kotlin/io/github/ninjin0802/keyboard/app/ClipboardPasteDeviceTest.kt" \
   --output "$REPORT" || status=1
 exit "$status"

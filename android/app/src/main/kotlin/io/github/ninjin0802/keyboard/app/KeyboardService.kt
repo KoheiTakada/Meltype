@@ -251,6 +251,9 @@ class KeyboardService : InputMethodService(), KeyListener {
     /** How many caret moves were taken as made by the user or the app (smoke test only). */
     internal fun outsideCaretMovesForSmokeTest(): Int = outsideCaretMoves
 
+    /** The keyboard's root view, to find the clipboard controls by their description (smoke test only). */
+    internal fun inputRootForSmokeTest(): View? = inputRoot
+
     private val languagePopup by lazy { LanguagePickerPopup(this) }
     private var keyboardView: KeyboardView? = null
     private var candidateBar: CandidateBarView? = null
