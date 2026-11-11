@@ -5,6 +5,8 @@ package io.github.ninjin0802.keyboard.app.view
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.Typeface
 import android.util.TypedValue
 import android.view.Gravity
@@ -30,6 +32,7 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
     private var shown: List<Candidate> = emptyList()
     private var shownSelected: Int? = null
     private var inlineText: String? = null
+    private var inlineThumbnail: Bitmap? = null
 
     init {
         isHorizontalScrollBarEnabled = false
@@ -42,13 +45,13 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
     }
 
     /** Supplemental Android suggestion is visually the third choice, never part of Core's candidate indices. */
-    fun show(candidates: List<Candidate>, selected: Int?, supplement: String? = null) {
-        if (candidates == shown && selected == shownSelected && supplement == inlineText) return
-        val changed = candidates != shown || supplement != inlineText
+    fun show(candidates: List<Candidate>, selected: Int?, supplement: String? = null, thumbnail: Bitmap? = null) {
+        if (candidates == shown && selected == shownSelected && supplement == inlineText && thumbnail === inlineThumbnail) return
+        val changed = candidates != shown || supplement != inlineText || thumbnail !== inlineThumbnail
         if (changed) {
             row.removeAllViews()
             val pad = (17 * density).toInt()
-            fun add(textValue: String, index: Int?) {
+            fun add(textValue: String, index: Int?, preview: Bitmap? = null) {
                 val tv = TextView(context).apply {
                     text = textValue
                     contentDescription = if (index == null) "補完候補: " + textValue else "変換候補: " + textValue
@@ -62,6 +65,12 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
                     ellipsize = android.text.TextUtils.TruncateAt.END
                     includeFontPadding = true
                     typeface = Typeface.DEFAULT
+                    if (preview != null) {
+                        val drawable = BitmapDrawable(resources, preview)
+                        drawable.setBounds(0, 0, (32 * density).toInt(), (28 * density).toInt())
+                        setCompoundDrawables(drawable, null, null, null)
+                        compoundDrawablePadding = (6 * density).toInt()
+                    }
                     setOnClickListener {
                         if (index == null) onInlinePick?.invoke() else onPick?.invoke(index)
                     }
@@ -72,15 +81,16 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
                 row.addView(tv, lp)
             }
             candidates.forEachIndexed { i, candidate ->
-                if (i == 2 && supplement != null) add(supplement, null)
+                if (i == 2 && supplement != null) add(supplement, null, thumbnail)
                 add(candidate.text, i)
             }
-            if (candidates.size < 3 && supplement != null) add(supplement, null)
+            if (candidates.size < 3 && supplement != null) add(supplement, null, thumbnail)
             scrollTo(0, 0)
         }
         shown = candidates
         shownSelected = selected
         inlineText = supplement
+        inlineThumbnail = thumbnail
         for (i in 0 until row.childCount) {
             val original = if (supplement == null) i
                 else when {
@@ -118,7 +128,7 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
         palette = Palette.of(context)
         val currentSelection = shownSelected
         shownSelected = null
-        show(shown, currentSelection, inlineText)
+        show(shown, currentSelection, inlineText, inlineThumbnail)
         requestLayout()
     }
 
