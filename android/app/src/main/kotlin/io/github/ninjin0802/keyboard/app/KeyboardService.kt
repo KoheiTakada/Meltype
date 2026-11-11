@@ -21,6 +21,7 @@ import android.view.View
 import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.text.InputType
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputContentInfo
@@ -30,10 +31,14 @@ import android.widget.TextView
 import android.widget.Toast
 import android.util.TypedValue
 import android.view.Gravity
-import java.io.File
+import io.github.ninjin0802.keyboard.app.core.CaretWatch
+import io.github.ninjin0802.keyboard.app.core.CoreChoiceKind
 import io.github.ninjin0802.keyboard.app.core.CoreInputAdapter
 import io.github.ninjin0802.keyboard.app.core.CoreMozcCallbacks
-import io.github.ninjin0802.keyboard.app.core.MeltypeCoreSession
+import io.github.ninjin0802.keyboard.app.core.ImeFieldFacts
+import io.github.ninjin0802.keyboard.app.core.ImeJson
+import io.github.ninjin0802.keyboard.app.core.MeltypeCoreHost
+import io.github.ninjin0802.keyboard.app.core.coreDataDirectory
 import io.github.ninjin0802.keyboard.app.emoji.EmojiCatalog
 import io.github.ninjin0802.keyboard.app.emoji.EmojiPanelView
 import io.github.ninjin0802.keyboard.app.emoji.EmojiRecentsStore
@@ -107,12 +112,14 @@ class KeyboardService : InputMethodService(), KeyListener {
     private val runner = ConversionRunner(worker, { mainHandler.post(it) }, converter, ::logWorkerFailure)
     private val session = InputSession()
     private val bridge = EditorBridge { currentInputConnection }
-    private val coreInput = CoreInputAdapter { currentInputConnection }
-    private var core: MeltypeCoreSession? = null
+    /** Where the Core's edits leave the caret; any other move is reported to the Core (CaretMoved). */
+    private val caretWatch = CaretWatch()
+    private val coreInput = CoreInputAdapter(caretWatch) { currentInputConnection }
+    private var core: MeltypeCoreHost? = null
     private var nativeCoreUnavailable = false
 
-    /** Keep the same C# detection engine as Windows/Mac/Linux for QWERTY romaji. */
-    private fun coreForRomaji(): MeltypeCoreSession? {
+    /** Keep the same C# Core (ImeHost) as Windows/Mac/Linux for QWERTY romaji. */
+    private fun coreForRomaji(): MeltypeCoreHost? {
         val japaneseComposition =
             nav.current == LayoutId.ROMAJI ||
                 ((nav.current == LayoutId.SYMBOLS || nav.current == LayoutId.SYMBOLS2) &&
@@ -120,14 +127,8 @@ class KeyboardService : InputMethodService(), KeyListener {
         if (!policy.convert || !japaneseComposition || nativeCoreUnavailable) return null
         core?.let { return it }
         return try {
-            MeltypeCoreSession.open(File(noBackupFilesDir, "meltype"), CoreMozcCallbacks(converter))
-                .also {
-                    core = it
-                    // The Kotlin/Mozc path already checks policy.learn; the C# core needs the same rule.
-                    it.setPrivate(!policy.learn)
-                    it.setCanDelete(true)
-                    it.setLiveConversion(Settings(this).liveConversionEnabled)
-                }
+            MeltypeCoreHost.open(coreDataDirectory(this), CoreMozcCallbacks(converter))
+                .also { core = it }
         } catch (e: Exception) {
             nativeCoreUnavailable = true
             Log.w(TAG, "Native Core unavailable: ${e.javaClass.simpleName}")
@@ -139,10 +140,38 @@ class KeyboardService : InputMethodService(), KeyListener {
         }
     }
 
-    private fun coreResult(payload: String?): Boolean {
+    /** What the editor tells about itself (ImeTrait names). Facts only: no keyboard policy. */
+    private var fieldTraits: List<String> = emptyList()
+
+    /** The editor's app (EditorInfo.packageName), the name app rules use. */
+    private var fieldApp: String? = null
+
+    /** False for an editor without text of its own (TYPE_NULL): what it returns is not the app's text. */
+    private var fieldReadable = true
+
+    private fun fieldFacts(): ImeFieldFacts {
+        val start = System.nanoTime()
+        return coreInput.field(fieldTraits, fieldApp, fieldReadable, selected = selStart != selEnd).also {
+            if (PerfLog.enabled) PerfLog.event("field", (System.nanoTime() - start) / 1000, it.before?.length ?: -1)
+        }
+    }
+
+    /**
+     * The Core already knows that the caret may have moved (the last event said so and no key came
+     * since). Further moves tell it nothing new, so they are not sent again (the Kotlin input path
+     * moves the caret on every key).
+     */
+    private var coreKnowsMoved = false
+
+    /** Caret moves by the user or the app seen so far (smoke test only). */
+    private var outsideCaretMoves = 0
+
+    /** Sends one event to the Core and applies the response. Returns whether the Core consumed it. */
+    private fun coreSend(instance: MeltypeCoreHost, event: String, moved: Boolean = false): Boolean {
+        coreKnowsMoved = moved
         return try {
             coreInput.emojiEnabled = Settings(this).emojiEnabled
-            val consumed = coreInput.apply(payload)
+            val consumed = coreInput.apply(instance.handle(event))
             candidateBar?.show(coreInput.candidates, coreInput.selected)
             consumed
         } catch (e: RuntimeException) {
@@ -154,16 +183,60 @@ class KeyboardService : InputMethodService(), KeyListener {
         }
     }
 
-    private fun coreKey(vk: Int, scalar: Int = 0, modifiers: Int = 0): Boolean {
+    /** A key that types [ch]. The Core decides its virtual key from the character. */
+    private fun coreCharacter(ch: Int, shift: Boolean = false): Boolean {
         val instance = coreForRomaji() ?: return false
-        val before = currentInputConnection?.getTextBeforeCursor(20, 0)?.toString()
-        val after = currentInputConnection?.getTextAfterCursor(20, 0)?.toString()
-        return coreResult(instance.handleKey(vk, scalar, modifiers, before, after))
+        return coreSend(instance, ImeJson.characterKey(ch, shift, fieldFacts()))
+    }
+
+    /** A key without a character (Back 0x08, Enter 0x0D, F6 0x75, F7 0x76, F10 0x79). */
+    private fun coreVirtualKey(vk: Int): Boolean {
+        val instance = coreForRomaji() ?: return false
+        return coreSend(instance, ImeJson.virtualKey(vk, fieldFacts()))
     }
 
     private fun commitCore() {
         val instance = core ?: return
-        if (coreInput.composing) coreResult(instance.commit())
+        if (coreInput.composing) coreSend(instance, ImeJson.commitRequested(fieldFacts()), moved = true)
+    }
+
+    /**
+     * The editor keeps the composing text as shown (finishComposingText, or the editor itself
+     * when it loses focus): the Core takes it as committed by the app (CommittedByApp), as IBus
+     * does. Without composing text, the Core still commits what it may hold (CommitRequested).
+     * Either way the caret may be elsewhere next time. [field] is false when the editor is going
+     * away: the Core then keeps the facts it last had.
+     */
+    private fun leaveCore(focusLeft: Boolean, field: Boolean = false) {
+        val instance = core
+        val composing = coreInput.composing
+        coreInput.clear()
+        if (instance == null) return
+        val facts = if (field) fieldFacts() else null
+        val event = if (composing) ImeJson.committedByApp(facts, focusLeft) else ImeJson.commitRequested(facts, focusLeft)
+        coreSend(instance, event, moved = true)
+    }
+
+    /**
+     * The user or the app moved the caret (a tap, the arrow keys, an edit by the app or by the
+     * Kotlin input path). Composing text stays where it is, committed as shown; otherwise the
+     * Core learns that the caret moved, so it does not re-commit the previous word there.
+     */
+    private fun caretMovedOutside() {
+        outsideCaretMoves++
+        val instance = core ?: return
+        if (coreInput.composing) {
+            currentInputConnection?.finishComposingText()
+            leaveCore(focusLeft = false, field = true)
+        } else if (!coreKnowsMoved) {
+            coreSend(instance, ImeJson.caretMoved(fieldFacts()), moved = true)
+        }
+    }
+
+    /** Inserts a character the Core passed on (did not consume), as the app would for a hardware key. */
+    private fun insertPassed(text: String) {
+        insert(text)
+        caretWatch.replaced(0, text.length)
     }
 
     private fun discardCore() {
@@ -171,6 +244,12 @@ class KeyboardService : InputMethodService(), KeyListener {
         core = null
         coreInput.clear()
     }
+
+    /** True once the Japanese QWERTY path has really gone through the native Core (smoke test only). */
+    internal fun nativeCoreActiveForSmokeTest(): Boolean = core != null && !nativeCoreUnavailable
+
+    /** How many caret moves were taken as made by the user or the app (smoke test only). */
+    internal fun outsideCaretMovesForSmokeTest(): Int = outsideCaretMoves
 
     private val languagePopup by lazy { LanguagePickerPopup(this) }
     private var keyboardView: KeyboardView? = null
@@ -290,9 +369,6 @@ class KeyboardService : InputMethodService(), KeyListener {
             toggleWaitMs = settings.toggleWaitMs.toLong(),
         )
         if (!settings.emojiEnabled) closeEmojiPanel()
-        if (changedKey == Settings.KEY_LIVE_CONVERSION_ENABLED) {
-            core?.setLiveConversion(settings.liveConversionEnabled)
-        }
         if (core != null) {
             coreInput.emojiEnabled = settings.emojiEnabled
             candidateBar?.show(coreInput.candidates, coreInput.selected)
@@ -379,30 +455,20 @@ class KeyboardService : InputMethodService(), KeyListener {
     private fun buildNormalKeyboardView(): View {
         val start = System.nanoTime()
         val bar = CandidateBarView(this).also { it.onPick = { index ->
-            if (core != null && nav.current == LayoutId.ROMAJI) {
-                when (val choice = coreInput.choices.getOrNull(index)) {
-                    null -> Unit
-                    else -> when (choice.kind) {
-                        io.github.ninjin0802.keyboard.app.core.CoreChoiceKind.PREDICTION ->
-                            coreResult(core?.selectPrediction(choice.nativeIndex))
-                        io.github.ninjin0802.keyboard.app.core.CoreChoiceKind.CONVERSION -> {
-                            coreResult(core?.selectCandidate(choice.nativeIndex))
-                            // Tapping a candidate commits it; the desktop UI
-                            // normally waits for a separate Enter press.
-                            coreKey(0x0D, 0x0D)
-                        }
-                        io.github.ninjin0802.keyboard.app.core.CoreChoiceKind.KANA_CORRECTION -> {
-                            coreKey(0x75) // F6: convert original keystrokes to hiragana
-                            coreKey(0x0D) // Enter: commit the corrected text
-                        }
-                        io.github.ninjin0802.keyboard.app.core.CoreChoiceKind.KATAKANA_CORRECTION -> {
-                            coreKey(0x76) // F7: convert to katakana
-                            coreKey(0x0D)
-                        }
-                        io.github.ninjin0802.keyboard.app.core.CoreChoiceKind.LATIN_CORRECTION -> {
-                            coreKey(0x79) // F10: use the original roman letters
-                            coreKey(0x0D)
-                        }
+            val instance = core
+            if (instance != null && nav.current == LayoutId.ROMAJI) {
+                val choice = coreInput.choices.getOrNull(index)
+                when {
+                    choice == null -> Unit
+                    choice.kind == CoreChoiceKind.CORE -> {
+                        // A prediction is committed by the click itself. A conversion
+                        // candidate is only selected, so a tap also presses Enter.
+                        coreSend(instance, ImeJson.candidateClicked(choice.nativeIndex, fieldFacts()))
+                        if (coreInput.composing) coreVirtualKey(0x0D)
+                    }
+                    else -> {
+                        coreVirtualKey(choice.kind.vk) // F6 / F7 / F10
+                        coreVirtualKey(0x0D) // Enter: commit the corrected text
                     }
                 }
             } else render(session.handle(Operation.Pick(index)))
@@ -591,11 +657,22 @@ class KeyboardService : InputMethodService(), KeyListener {
         // 新しい入力欄では、何も書き込まない。
         currentInputConnection?.finishComposingText()
         dropComposition()
+        // Restarted in the same editor without finishing it: the editor kept the composing text.
+        if (coreInput.composing) leaveCore(focusLeft = false)
         policy = fieldPolicy(info.inputType, info.imeOptions)
         clipboardButton?.visibility = if (policy.isPassword) View.GONE else View.VISIBLE
         imeOptions = info.imeOptions
+        fieldTraits = buildList {
+            if (policy.isPassword) add("Password")
+            if (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING != 0) add("Private")
+        }
+        fieldApp = info.packageName
+        fieldReadable = info.inputType != InputType.TYPE_NULL
         selStart = info.initialSelStart
         selEnd = info.initialSelEnd
+        caretWatch.reset(selStart, selEnd)
+        core?.let { instance -> coreSend(instance, ImeJson.focusEntered(fieldFacts()), moved = true) }
+        coreInField = true
         val settings = Settings(this)
         session.config = SessionConfig(
             toggleEnabled = settings.toggleEnabled,
@@ -613,6 +690,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         closeClipboardPanel()
         emojiPanel?.cancelTouch()
         dropComposition()
+        leaveField()
         super.onFinishInputView(finishingInput)
     }
 
@@ -620,7 +698,19 @@ class KeyboardService : InputMethodService(), KeyListener {
         keyboardView?.cancelTouch()
         emojiPanel?.cancelTouch()
         dropComposition()
+        leaveField()
         super.onFinishInput()
+    }
+
+    /** Between onStartInputView and leaving it (both onFinishInputView and onFinishInput come). */
+    private var coreInField = false
+
+    /** The keyboard leaves the editor: the editor keeps the composing text as shown (focusLeft). */
+    private fun leaveField() {
+        if (!coreInField) return
+        coreInField = false
+        if (coreInput.composing) currentInputConnection?.finishComposingText()
+        leaveCore(focusLeft = true)
     }
 
     override fun onUpdateSelection(
@@ -634,16 +724,20 @@ class KeyboardService : InputMethodService(), KeyListener {
             dropComposition()
             currentInputConnection?.finishComposingText()
         }
+        // Core の書き換えでないキャレットの移動は、Core に知らせる（変換中なら、出ている文字のまま確定させる）。
+        if (!caretWatch.isOwn(newSelStart, newSelEnd, candidatesEnd, coreInput.composing)) caretMovedOutside()
     }
 
-    /** 未確定文字を、入力欄に何も送らずに捨てる。頼んである変換の結果も受け取らない。 */
+    /**
+     * Kotlin の入力の未確定文字を、入力欄に何も送らずに捨てる。頼んである変換の結果も受け取らない。
+     * Core の未確定文字は、呼ぶ側が [leaveCore] で扱う。
+     */
     private fun dropComposition() {
         fieldGeneration++
         session.reset()
         runner.cancelPending()
         bridge.forget()
         context.reset()
-        discardCore()
         candidateBar?.show(emptyList(), null)
     }
 
@@ -687,12 +781,13 @@ class KeyboardService : InputMethodService(), KeyListener {
                     val native = coreForRomaji()
                     if (native != null) {
                         typed.forEach { ch ->
-                            val vk = if (ch.code <= 0x7F) ch.uppercaseChar().code else 0
-                            val consumed = coreKey(vk, ch.code)
+                            // Only the character: the Core decides the key from it
+                            // (a virtual key made from '.' would be Delete).
+                            val consumed = coreCharacter(ch.code)
                             if (!consumed) {
                                 // A deliberately direct key still reaches the
                                 // editor, without a preceding commit of Japanese.
-                                insert(ch.toString())
+                                insertPassed(ch.toString())
                             }
                         }
                     } else {
@@ -705,10 +800,9 @@ class KeyboardService : InputMethodService(), KeyListener {
                 // Core runs exactly the desktop detection rules; fallback to the existing
                 // Kotlin romaji path only if the native shared library is unavailable.
                 val scalar = if (shift != ShiftState.OFF) action.char.uppercaseChar() else action.char
-                val consumed = coreKey(action.char.uppercaseChar().code, scalar.code,
-                    if (shift != ShiftState.OFF) 1 else 0)
+                val consumed = coreCharacter(scalar.code, shift = shift != ShiftState.OFF)
                 if (core != null) {
-                    if (!consumed) insert(scalar.toString())
+                    if (!consumed) insertPassed(scalar.toString())
                 } else if (shift != ShiftState.OFF && action.char.isLetter()) {
                     // ⇧ が効いているときは、ローマ字にしない。確定してから、大文字を1文字そのまま入れる。
                     commitComposing()
@@ -722,7 +816,10 @@ class KeyboardService : InputMethodService(), KeyListener {
             KeyAction.ToggleCase -> replaceLast(Operation.ToggleCase, Latin::toggleCase)
             KeyAction.Delete -> when {
                 coreInput.composing && coreForRomaji() != null -> {
-                    if (!coreKey(0x08)) bridge.deleteBeforeCursor()
+                    if (!coreVirtualKey(0x08)) {
+                        bridge.deleteBeforeCursor()
+                        caretWatch.lose()
+                    }
                 }
                 session.isComposing -> render(session.handle(Operation.Delete))
                 selStart != selEnd -> sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)   // 選んである範囲を消す
@@ -730,7 +827,7 @@ class KeyboardService : InputMethodService(), KeyListener {
             }
             KeyAction.Space -> {
                 if (coreInput.composing && coreForRomaji() != null) {
-                    if (!coreKey(0x20, ' '.code)) insert(" ")
+                    if (!coreCharacter(' '.code)) insertPassed(" ")
                     return
                 }
                 val selecting = session.isComposing && !session.config.direct
@@ -742,7 +839,8 @@ class KeyboardService : InputMethodService(), KeyListener {
                 }
             }
             KeyAction.Enter -> if (coreInput.composing && coreForRomaji() != null) {
-                if (!coreKey(0x0D)) {
+                if (!coreVirtualKey(0x0D)) {
+                    caretWatch.lose()
                     val editorAction = enterAction(imeOptions)
                     if (editorAction != null) currentInputConnection?.performEditorAction(editorAction)
                     else sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
