@@ -9,6 +9,8 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.graphics.Color
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import java.lang.ref.WeakReference
 import android.inputmethodservice.InputMethodService
 import android.os.Build
@@ -271,6 +273,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     private var suggestedPhonePart: String? = null
     private var phoneLeaveRecordedForField = false
     private var lastClipboard: HistoryClip? = null
+    private var lastClipboardThumbnail: Bitmap? = null
     private var baseCandidates: List<io.github.ninjin0802.keyboard.engine.Candidate> = emptyList()
     private var baseSelected: Int? = null
     private var inlineAction: (() -> Unit)? = null
@@ -293,6 +296,7 @@ class KeyboardService : InputMethodService(), KeyListener {
             else currentInputConnection?.getTextBeforeCursor(160, 0)?.toString()
         val entry: PersonalCompletion? = if (before.isNullOrEmpty()) null
             else PersonalCompleter.suggest(before, dictionary.list())
+        var thumbnail: Bitmap? = null
         val inline = when {
             privateField || before == null -> null
             entry != null -> {
@@ -311,12 +315,15 @@ class KeyboardService : InputMethodService(), KeyListener {
                     .any { ClipDescription.compareMimeTypes(clip.mime, it) }
                 if (accepted) {
                     inlineAction = { pasteClipboardItem(clip); refreshInlineSuggestion() }
-                    if (clip.kind == "image") "スクリーンショット" else clip.text.take(40)
+                    if (clip.kind == "image") {
+                        thumbnail = lastClipboardThumbnail
+                        "スクリーンショット"
+                    } else clip.text.take(40)
                 } else null
             }
             else -> null
         }
-        bar.show(baseCandidates, baseSelected, inline)
+        bar.show(baseCandidates, baseSelected, inline, thumbnail)
     }
 
     private fun acceptPersonalCompletion(suggestion: PersonalCompletion) {
@@ -347,8 +354,16 @@ class KeyboardService : InputMethodService(), KeyListener {
         if (clipboardWorker.isShutdown) return
         clipboardWorker.execute {
             val newest = runCatching { clipboardStore.list().firstOrNull() }.getOrNull()
+            val preview = if (newest?.kind == "image") {
+                runCatching {
+                    clipboardStore.mediaFile(newest)?.absolutePath?.let {
+                        BitmapFactory.decodeFile(it, BitmapFactory.Options().apply { inSampleSize = 8 })
+                    }
+                }.getOrNull()
+            } else null
             mainHandler.post {
                 lastClipboard = newest
+                lastClipboardThumbnail = preview
                 refreshInlineSuggestion()
             }
         }
