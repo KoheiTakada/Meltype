@@ -42,9 +42,6 @@
             android:exported="false"
             android:grantUriPermissions="true" />
         <activity
-            android:name=".essentials.DictionaryActivity"
-            android:exported="false" />
-        <activity
             android:name=".LicensesActivity"
             android:exported="false" />
         <service
