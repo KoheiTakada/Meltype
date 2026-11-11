@@ -113,7 +113,7 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
             maxWidth = dp(220)
             includeFontPadding = false
             if (secondary != null) {
-                isSingleLine = false
+                setSingleLine(false)
                 maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
                 val styled = SpannableStringBuilder(split?.first ?: value).append("\n").append(secondary)
@@ -125,7 +125,7 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
                 text = styled
                 setLineSpacing(-dp(2).toFloat(), 1f)
             } else {
-                isSingleLine = true
+                setSingleLine(true)
                 ellipsize = TextUtils.TruncateAt.END
                 text = value
             }
