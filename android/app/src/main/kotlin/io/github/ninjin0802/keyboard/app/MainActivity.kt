@@ -2,7 +2,6 @@
 package io.github.ninjin0802.keyboard.app
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.Manifest
 import android.content.pm.PackageManager
 import android.content.ComponentName
@@ -24,14 +23,16 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.SeekBar
-import android.widget.Switch
 import android.widget.TextView
+import android.widget.EditText
+import android.text.InputType
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardRetention
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
 import io.github.ninjin0802.keyboard.app.clipboard.RecentScreenshotSource
 import io.github.ninjin0802.keyboard.app.layout.LayoutId
-import io.github.ninjin0802.keyboard.app.essentials.DictionaryActivity
+import io.github.ninjin0802.keyboard.app.essentials.DictionaryAdapter
+import io.github.ninjin0802.keyboard.app.essentials.PersonalCompleter
+import io.github.ninjin0802.keyboard.app.essentials.UserWord
 import java.util.Locale
 
 /**
@@ -42,15 +43,28 @@ class MainActivity : Activity() {
     private val settings by lazy { Settings(this) }
     private val density by lazy { resources.displayMetrics.density }
     private fun dp(n: Int) = (n * density + .5f).toInt()
-    private enum class Page { HOME, LANGUAGES, GENERAL, CORRECTION, EMOJI }
+    private enum class Page { HOME, LANGUAGES, GENERAL, CORRECTION, EMOJI, DICTIONARY, PERSONAL, WORD_EDIT, PERSONAL_EDIT, CHOICE }
     private var page = Page.HOME
+    private val userWords by lazy { DictionaryAdapter(this) }
+    private var editingWord: UserWord? = null
+    private var personalKind: String = "email"
+    private var returnChoicePage = Page.GENERAL
+    private var choiceTitle = ""
+    private var choiceSelected = -1
+    private var choiceOptions = emptyList<Pair<String, () -> Unit>>()
 
     // Android 13+ gesture Back dispatches through this callback. Earlier
     // Android versions still call the onBackPressed() compatibility override.
     private var systemBackCallback: OnBackInvokedCallback? = null
 
     private fun navigateBack() {
-        if (page == Page.HOME) finish() else navigate(Page.HOME)
+        when (page) {
+            Page.HOME -> finish()
+            Page.WORD_EDIT -> navigate(Page.DICTIONARY)
+            Page.PERSONAL_EDIT -> navigate(Page.PERSONAL)
+            Page.CHOICE -> navigate(returnChoicePage)
+            else -> navigate(Page.HOME)
+        }
     }
 
     /**
@@ -85,7 +99,11 @@ class MainActivity : Activity() {
             @Suppress("DEPRECATION")
             val legacyBottom = insets?.systemWindowInsetBottom ?: 0
             val top = maxOf(reportedTop, legacyTop, platformBarHeight("status_bar_height"))
-            val bottom = maxOf(reportedBottom, legacyBottom, platformBarHeight("navigation_bar_height"))
+            val imeBottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets?.getInsets(WindowInsets.Type.ime())?.bottom ?: 0
+            } else 0
+            val bottom = maxOf(reportedBottom, legacyBottom, imeBottom,
+                platformBarHeight("navigation_bar_height"))
             if (root.paddingTop != top || root.paddingBottom != bottom) {
                 root.setPadding(0, top, 0, bottom)
             }
@@ -123,6 +141,10 @@ class MainActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         page = state?.getString("page")?.let { runCatching { Page.valueOf(it) }.getOrNull() } ?: Page.HOME
+        // Editors and option lists contain transient callbacks, never resurrect an empty form.
+        if (page == Page.WORD_EDIT) page = Page.DICTIONARY
+        if (page == Page.PERSONAL_EDIT) page = Page.PERSONAL
+        if (page == Page.CHOICE) page = Page.GENERAL
         // Let our root own *all* bar insets. Android 15+ is edge-to-edge
         // regardless of target window flags; explicitly match that behavior
         // on Android 11-14 so our layout receives unconsumed status insets.
@@ -266,13 +288,15 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
         if (checked != null) {
-            val toggle = Switch(this@MainActivity).apply {
-                isChecked = checked
+            val toggle = AppToggle(this@MainActivity).apply {
                 contentDescription = title
-                setOnCheckedChangeListener { _, value -> onToggle?.invoke(value) }
+                setChecked(checked)
+                this.onToggle = { onToggle?.invoke(it) }
             }
-            row.addView(toggle, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(12) })
-            row.setOnClickListener { toggle.isChecked = !toggle.isChecked }
+            row.addView(toggle, LinearLayout.LayoutParams(dp(52), dp(40)).apply {
+                marginStart = dp(12)
+            })
+            row.setOnClickListener { toggle.performClick() }
             row.isFocusable = true
         } else if (action != null) {
             row.addView(text("›", 26f, muted = true).apply { gravity = Gravity.CENTER },
@@ -311,13 +335,27 @@ class MainActivity : Activity() {
             })
     }
 
+    /** Settings options are a navigable Meltype page, never an OS modal. */
     private fun choose(title: String, selected: Int, values: List<Pair<String, () -> Unit>>) {
-        AlertDialog.Builder(this).setTitle(title)
-            .setSingleChoiceItems(values.map { it.first }.toTypedArray(), selected) { dialog, index ->
-                values[index].second()
-                dialog.dismiss()
-                render()
-            }.setNegativeButton(android.R.string.cancel, null).show()
+        choiceTitle = title
+        choiceSelected = selected
+        choiceOptions = values
+        returnChoicePage = page
+        navigate(Page.CHOICE)
+    }
+
+    private fun choice(content: LinearLayout) {
+        title(content, choiceTitle)
+        card(content) {
+            choiceOptions.forEachIndexed { index, option ->
+                if (index > 0) divider()
+                entry(option.first, if (index == choiceSelected) "選択中" else null,
+                    if (index == choiceSelected) "✓" else null, selected = index == choiceSelected) {
+                    option.second()
+                    navigate(returnChoicePage)
+                }
+            }
+        }
     }
 
     /** Remains accessible from the launcher even when the IME process crashes. */
@@ -400,6 +438,11 @@ class MainActivity : Activity() {
             Page.GENERAL -> general(content)
             Page.CORRECTION -> correction(content)
             Page.EMOJI -> emoji(content)
+            Page.DICTIONARY -> dictionaryPage(content)
+            Page.PERSONAL -> personalPage(content)
+            Page.WORD_EDIT -> wordEditor(content)
+            Page.PERSONAL_EDIT -> personalEditor(content)
+            Page.CHOICE -> choice(content)
         }
         return ScrollView(this).apply {
             isFillViewport = true
@@ -440,9 +483,11 @@ class MainActivity : Activity() {
             entry("設定", "スペース・振動・キー操作", "☷", selected = selected == Page.GENERAL) { navigate(Page.GENERAL) }
         }
         card(content) {
-            entry("ユーザー辞書", "読み・単語・個人情報の補完", "▤") {
-                startActivity(Intent(this@MainActivity, DictionaryActivity::class.java))
-            }
+            entry("ユーザー辞書", "読みから単語を変換", "▤",
+                selected = selected == Page.DICTIONARY) { navigate(Page.DICTIONARY) }
+            divider()
+            entry("個人情報", "メールアドレス・電話番号・住所", "◉",
+                selected = selected == Page.PERSONAL) { navigate(Page.PERSONAL) }
             divider()
             entry("修正と候補", "ライブ変換・入力候補", "✓", selected = selected == Page.CORRECTION) { navigate(Page.CORRECTION) }
             divider()
@@ -524,26 +569,10 @@ class MainActivity : Activity() {
     }
 
     private fun timing() {
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(8), dp(18), dp(4))
-        }
-        val value = text(waitText(settings.toggleWaitMs), 17f)
-        content.addView(value)
-        content.addView(SeekBar(this).apply {
-            max = WAIT_STEPS - 1
-            progress = progressOf(settings.toggleWaitMs)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seek: SeekBar, n: Int, fromUser: Boolean) {
-                    value.text = waitText(waitOfProgress(n))
-                    if (fromUser) settings.toggleWaitMs = waitOfProgress(n)
-                }
-                override fun onStartTrackingTouch(seek: SeekBar) = Unit
-                override fun onStopTrackingTouch(seek: SeekBar) = Unit
+        choose("トグル判定時間", progressOf(settings.toggleWaitMs),
+            (0 until WAIT_STEPS).map { index ->
+                waitText(waitOfProgress(index)) to { settings.toggleWaitMs = waitOfProgress(index) }
             })
-        })
-        AlertDialog.Builder(this).setTitle("トグル判定時間")
-            .setView(content).setPositiveButton(android.R.string.ok) { _, _ -> render() }.show()
     }
 
     private fun correction(content: LinearLayout) {
