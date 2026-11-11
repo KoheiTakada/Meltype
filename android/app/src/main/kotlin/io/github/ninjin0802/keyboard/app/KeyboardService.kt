@@ -5,6 +5,8 @@ package io.github.ninjin0802.keyboard.app
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
+import android.database.ContentObserver
+import android.provider.MediaStore
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
@@ -94,6 +96,7 @@ import io.github.ninjin0802.keyboard.app.clipboard.ClipboardEditorActivity
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardLinkPreviewLoader
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardPanelView
+import io.github.ninjin0802.keyboard.app.clipboard.RecentScreenshotSource
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardProcessing
 import io.github.ninjin0802.keyboard.app.clipboard.HistoryClip
 import io.github.ninjin0802.keyboard.app.essentials.DictionaryAdapter
@@ -392,6 +395,62 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     private val clipboardWorker = Executors.newSingleThreadExecutor()
     private val clipboardStore by lazy { ClipboardHistoryStore(applicationContext) }
+    private val screenshots by lazy { RecentScreenshotSource(applicationContext) }
+    private var lastScreenshotId = -1L
+    private var screenshotObserverRegistered = false
+    private val screenshotObserver by lazy {
+        object : ContentObserver(mainHandler) {
+            override fun onChange(selfChange: Boolean) {
+                super.onChange(selfChange)
+                detectRecentScreenshot()
+            }
+        }
+    }
+
+    private fun detectRecentScreenshot() {
+        if (!screenshots.enabled() || clipboardWorker.isShutdown) return
+        clipboardWorker.execute {
+            val image = screenshots.newestRecent() ?: return@execute
+            if (image.id == lastScreenshotId) return@execute
+            lastScreenshotId = image.id
+            // Reuse the exact image-copy/thumbnail path of the existing clipboard manager.
+            val copied = runCatching {
+                clipboardStore.capture(ClipData.newUri(contentResolver, "Screenshot", image.uri))
+            }.getOrDefault(false)
+            if (copied) mainHandler.post {
+                refreshClipboardPanel()
+                updateLatestClipboardSuggestion()
+            }
+        }
+    }
+
+    private fun startScreenshotObserver() {
+        if (!screenshots.enabled() || screenshotObserverRegistered) return
+        try {
+            contentResolver.registerContentObserver(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                true, screenshotObserver)
+            screenshotObserverRegistered = true
+            detectRecentScreenshot()
+        } catch (error: SecurityException) {
+            Log.w(TAG, "Screenshot observer permission unavailable", error)
+        }
+    }
+
+    private fun stopScreenshotObserver() {
+        if (!screenshotObserverRegistered) return
+        contentResolver.unregisterContentObserver(screenshotObserver)
+        screenshotObserverRegistered = false
+    }
+
+    override fun onWindowShown() {
+        super.onWindowShown()
+        startScreenshotObserver()
+    }
+
+    override fun onWindowHidden() {
+        stopScreenshotObserver()
+        super.onWindowHidden()
+    }
     private var clipboardManager: ClipboardManager? = null
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
         if (policy.isPassword) return@OnPrimaryClipChangedListener
@@ -507,6 +566,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onDestroy() {
+        stopScreenshotObserver()
         if (activeForSmokeTest?.get() === this) activeForSmokeTest = null
         clipboardManager?.removePrimaryClipChangedListener(clipboardListener)
         clipboardWorker.shutdown()
@@ -807,7 +867,13 @@ class KeyboardService : InputMethodService(), KeyListener {
         )
         screens.fieldStarted(policy.layout)
         displayCandidates(emptyList(), null)
+        // A default IME is permitted to read the current clipboard while visible.
+        // The listener alone misses clips copied before the keyboard service started.
+        if (!policy.isPassword && !fieldTraits.contains("Private")) {
+            runCatching { clipboardManager?.primaryClip }.getOrNull()?.let(::captureClipboard)
+        }
         updateLatestClipboardSuggestion()
+        startScreenshotObserver()
         applyCurrentInsets()
     }
 
