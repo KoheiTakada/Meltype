@@ -692,7 +692,7 @@ class KeyboardService : InputMethodService(), KeyListener {
                 gravity = Gravity.CENTER
                 setTextColor(Color.WHITE)
                 setPadding(dp(8), 0, dp(8), 0)
-                background = AppChrome.shape(this@KeyboardService, 0xFF3B3B3F.toInt(), 17)
+                this.background = AppChrome.shape(this@KeyboardService, 0xFF3B3B3F.toInt(), 17)
                 visibility = View.GONE
                 isClickable = true
                 setOnClickListener { visibility = View.GONE }
@@ -1185,7 +1185,7 @@ class KeyboardService : InputMethodService(), KeyListener {
                     }
                     mainHandler.post {
                         clipboardManager?.setPrimaryClip(ClipData.newPlainText("Meltype", normalized))
-                        Toast.makeText(this, "パラメータを除去してコピーしました", Toast.LENGTH_SHORT).show()
+                        showKeyboardNotice("パラメータを除去してコピーしました")
                         refreshClipboardPanel()
                     }
                 }
@@ -1213,13 +1213,13 @@ class KeyboardService : InputMethodService(), KeyListener {
         if (clipboardWorker.isShutdown) return
         val text = result.getOrNull()
         if (text == null) {
-            Toast.makeText(this, "処理できませんでした（言語・画像・モデルを確認）", Toast.LENGTH_SHORT).show()
+            showKeyboardNotice("処理できませんでした（言語・画像・モデルを確認）")
             return
         }
         clipboardWorker.execute {
             clipboardStore.saveText(text)
             mainHandler.post {
-                Toast.makeText(this, "結果をクリップボード履歴に保存しました", Toast.LENGTH_SHORT).show()
+                showKeyboardNotice("結果をクリップボード履歴に保存しました")
                 refreshClipboardPanel()
             }
         }
