@@ -76,6 +76,7 @@ import io.github.ninjin0802.keyboard.app.view.LanguagePickerPopup
 import io.github.ninjin0802.keyboard.app.view.ImeGlassSurface
 import io.github.ninjin0802.keyboard.app.view.KeyboardTopEdgeHighlight
 import io.github.ninjin0802.keyboard.app.view.Palette
+import io.github.ninjin0802.keyboard.app.AppChrome
 import io.github.ninjin0802.keyboard.app.view.bottomPaddingPx
 import io.github.ninjin0802.keyboard.engine.Clause
 import io.github.ninjin0802.keyboard.engine.Converter
@@ -597,47 +598,35 @@ class KeyboardService : InputMethodService(), KeyListener {
         buildEmergencyKeyboardView()
     }
 
-    /** No native converter or keyboard assets are used in this emergency UI. */
+    /** Emergency exits keep working even if the converter cannot be initialized. */
     private fun buildEmergencyKeyboardView(): View {
-        val pad = (16 * resources.displayMetrics.density).toInt()
+        val surface = AppChrome.colors(this)
+        val space = AppChrome.dp(this, 15)
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-            setBackgroundColor(Color.WHITE)
-            addView(TextView(this@KeyboardService).apply {
-                text = "Meltype を起動できませんでした"
-                textSize = 16f
-                setTextColor(Color.BLACK)
-            })
-            addView(TextView(this@KeyboardService).apply {
-                text = "別のキーボードに切り替える"
-                contentDescription = text
-                textSize = 16f
-                setTextColor(Color.BLUE)
-                setPadding(0, pad, 0, pad)
-                isClickable = true
-                setOnClickListener {
-                    try {
-                        (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
-                            .showInputMethodPicker()
-                    } catch (error: RuntimeException) {
-                        Log.w(TAG, "Input method picker unavailable", error)
-                        startActivity(Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    }
-                }
-            })
-            addView(TextView(this@KeyboardService).apply {
-                text = "Android のキーボード設定"
-                contentDescription = text
-                textSize = 14f
-                setTextColor(Color.BLUE)
-                setPadding(0, pad, 0, pad)
-                isClickable = true
-                setOnClickListener {
+            setPadding(space, space, space, space)
+            setBackgroundColor(surface.background)
+            addView(AppChrome.text(this@KeyboardService,
+                "Meltype を起動できませんでした", 16f, strong = true))
+            addView(AppChrome.action(this@KeyboardService,
+                "別のキーボードに切り替える") {
+                try {
+                    (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                        .showInputMethodPicker()
+                } catch (error: RuntimeException) {
+                    Log.w(TAG, "Input method picker unavailable", error)
                     startActivity(Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 }
+            }, LinearLayout.LayoutParams(-1, AppChrome.dp(this@KeyboardService, 46)).apply {
+                topMargin = space
+            })
+            addView(AppChrome.action(this@KeyboardService,
+                "Android のキーボード設定", filled = false) {
+                startActivity(Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }, LinearLayout.LayoutParams(-1, AppChrome.dp(this@KeyboardService, 45)).apply {
+                topMargin = AppChrome.dp(this@KeyboardService, 8)
             })
         }
     }
