@@ -116,8 +116,8 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
                 isSingleLine = false
                 maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
-                val styled = SpannableStringBuilder(split.first).append("\n").append(secondary)
-                val secondLine = split.first.length + 1
+                val styled = SpannableStringBuilder(split?.first ?: value).append("\n").append(secondary)
+                val secondLine = (split?.first ?: value).length + 1
                 styled.setSpan(RelativeSizeSpan(.67f), secondLine, styled.length,
                     Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 styled.setSpan(ForegroundColorSpan(palette.subText), secondLine, styled.length,
