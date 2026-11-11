@@ -191,6 +191,41 @@ class SettingsScreenDeviceTest {
         }
     }
 
+    @Test fun dictionaryAndPersonalInformationAreSeparateNonModalEditors() {
+        val activity = open()
+        try {
+            instrumentation.runOnMainSync {
+                val personal = findText(activity.window.decorView, "個人情報")
+                assertNotNull("Personal information has its own settings category", personal)
+                val row = (personal!!.parent as View).parent as View
+                row.performClick()
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                val root = activity.window.decorView
+                assertNotNull(findText(root, "メールアドレス"))
+                assertNotNull(findText(root, "電話番号"))
+                assertNotNull(findText(root, "住所"))
+                val addEmail = findText(root, "＋ メールアドレスを登録")
+                assertNotNull(addEmail)
+                ((addEmail!!.parent as View).parent as View).performClick()
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                val root = activity.window.decorView
+                assertNotNull("The editor must be in the content pane",
+                    findText(root, "登録内容"))
+                assertNotNull(findText(root, "保存"))
+                assertNotNull(findText(root, "キャンセル"))
+                // No Android AlertDialog / modal is used for personal information.
+                val pane = activity.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
+                assertTrue("Editor must remain in the activity root", pane.isAttachedToWindow)
+            }
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
     @Test fun unfoldedScreenKeepsCategoriesBesideActiveSettings() {
         val activity = open()
         try {
