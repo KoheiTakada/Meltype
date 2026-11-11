@@ -11,6 +11,13 @@ import android.view.View
 import android.view.ViewGroup
 import io.github.ninjin0802.keyboard.app.AppToggle
 import android.widget.TextView
+import android.widget.LinearLayout
+import android.graphics.drawable.GradientDrawable
+import android.text.Spanned
+import android.text.style.RelativeSizeSpan
+import io.github.ninjin0802.keyboard.app.view.CandidateBarView
+import io.github.ninjin0802.keyboard.app.view.BarSuggestion
+import io.github.ninjin0802.keyboard.app.view.SuggestionKind
 import io.github.ninjin0802.keyboard.app.core.CoreConfig
 import io.github.ninjin0802.keyboard.app.core.coreDataDirectory
 import androidx.test.platform.app.InstrumentationRegistry
@@ -223,6 +230,32 @@ class SettingsScreenDeviceTest {
             }
         } finally {
             instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
+    @Test fun emailAndClipboardHaveDistinctGboardLikeCandidateSurfaces() {
+        instrumentation.runOnMainSync {
+            val bar = CandidateBarView(instrumentation.targetContext)
+            bar.show(emptyList(), null, BarSuggestion("kohei.t0312@gmail.com", SuggestionKind.EMAIL))
+            val row = bar.getChildAt(0) as LinearLayout
+            val email = row.getChildAt(0) as TextView
+            assertEquals("kohei.t0312\n@gmail.com", email.text.toString())
+            val text = email.text as Spanned
+            val spans = text.getSpans(0, text.length, RelativeSizeSpan::class.java)
+            assertTrue("The domain must use a smaller font", spans.any { it.sizeChange < 1f })
+            bar.show(emptyList(), null, BarSuggestion("Copied text", SuggestionKind.CLIPBOARD_TEXT))
+            val pill = row.getChildAt(0)
+            assertTrue("Clipboard should be a container, not a plain candidate cell",
+                pill is LinearLayout)
+            assertTrue("Clipboard chip is an explicitly rounded custom surface",
+                pill.background is GradientDrawable)
+            assertEquals("クリップボードを貼り付ける: Copied text",
+                pill.contentDescription.toString())
+            bar.show(emptyList(), null, BarSuggestion("Screenshot", SuggestionKind.CLIPBOARD_IMAGE))
+            val imagePill = row.getChildAt(0) as LinearLayout
+            assertNotNull(findText(imagePill, "Screenshot"))
+            bar.show(emptyList(), null, BarSuggestion("09012345678", SuggestionKind.PHONE))
+            assertEquals("09012345678", (row.getChildAt(0) as TextView).text.toString())
         }
     }
 
