@@ -28,6 +28,7 @@ import android.widget.TextView
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardRetention
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
 import io.github.ninjin0802.keyboard.app.layout.LayoutId
+import io.github.ninjin0802.keyboard.app.essentials.DictionaryActivity
 import java.util.Locale
 
 /**
@@ -401,6 +402,10 @@ class MainActivity : Activity() {
             entry("設定", "スペース・振動・キー操作", "☷", selected = selected == Page.GENERAL) { navigate(Page.GENERAL) }
         }
         card(content) {
+            entry("ユーザー辞書", "読み・単語・個人情報の補完", "▤") {
+                startActivity(Intent(this@MainActivity, DictionaryActivity::class.java))
+            }
+            divider()
             entry("修正と候補", "ライブ変換・入力候補", "✓", selected = selected == Page.CORRECTION) { navigate(Page.CORRECTION) }
             divider()
             entry("絵文字", if (settings.emojiEnabled) "有効" else "無効", "☺", selected = selected == Page.EMOJI) {
