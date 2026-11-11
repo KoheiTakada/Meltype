@@ -420,7 +420,8 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     private fun detectRecentScreenshot() {
-        if (!screenshots.enabled() || clipboardWorker.isShutdown) return
+        if (!screenshots.enabled() || clipboardWorker.isShutdown ||
+            !coreInField || policy.isPassword || fieldTraits.contains("Private")) return
         clipboardWorker.execute {
             val image = screenshots.newestRecent() ?: return@execute
             if (image.id == lastScreenshotId) return@execute
@@ -437,7 +438,8 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     private fun startScreenshotObserver() {
-        if (!screenshots.enabled() || screenshotObserverRegistered) return
+        if (!screenshots.enabled() || screenshotObserverRegistered ||
+            !coreInField || policy.isPassword || fieldTraits.contains("Private")) return
         try {
             contentResolver.registerContentObserver(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                 true, screenshotObserver)
