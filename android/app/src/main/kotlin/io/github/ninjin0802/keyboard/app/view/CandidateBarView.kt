@@ -109,7 +109,10 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, primarySize)
             gravity = Gravity.CENTER
             setPadding(dp(12), 0, dp(12), 0)
+            // TextView.minWidth affects measuring; View.minimumWidth is also
+            // required for the actual accessible 64dp touch target.
             minWidth = dp(64)
+            minimumWidth = dp(64)
             maxWidth = dp(220)
             includeFontPadding = false
             if (secondary != null) {
