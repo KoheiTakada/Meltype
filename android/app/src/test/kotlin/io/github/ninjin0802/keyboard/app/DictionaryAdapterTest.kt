@@ -30,6 +30,14 @@ class DictionaryAdapterTest {
         assertNull(PersonalCompleter.suggest("埼玉県",list))
         assertNull(PersonalCompleter.suggest("じゅうしょ",list))
     }
+    @Test fun townReadingCompletesFromTypedKanaOrRomajiWithoutKanjiMatching() {
+        val entries = listOf(UserWord("かくうまち", "埼玉県さいたま市架空町1-2-3"))
+        assertEquals("架空町1-2-3", PersonalCompleter.suggest("kakuu", entries)?.replacement)
+        assertEquals("架空町1-2-3", PersonalCompleter.suggest("かくう", entries)?.replacement)
+        assertEquals("埼玉県さいたま市架空町1-2-3",
+            PersonalCompleter.suggest("saitama", entries)?.replacement)
+    }
+
     @Test fun ordinaryDictionaryIsNativeOnly() {
         assertNull(PersonalCompleter.suggest("めるたいぷ",listOf(UserWord("めるたいぷ","Meltype"))))
     }
