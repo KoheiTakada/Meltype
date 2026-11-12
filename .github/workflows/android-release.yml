@@ -14,7 +14,7 @@ on:
       source_ref:
         description: Source branch or commit to build
         required: true
-        default: 25fcb7413f4791c0aa003027a0e2f6c040f87c75
+        default: edd063ab50d796bbe69285787db9c4103d885bd0
         type: string
 
 permissions:
@@ -80,7 +80,7 @@ jobs:
           PY
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || '25fcb7413f4791c0aa003027a0e2f6c040f87c75' }}
+          ref: ${{ inputs.source_ref || 'edd063ab50d796bbe69285787db9c4103d885bd0' }}
           fetch-depth: 0
       - name: Record exact source commit
         id: source
