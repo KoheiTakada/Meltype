@@ -3,7 +3,7 @@
 name: Android QA — reproducible device tests
 on:
   push:
-    branches: [feat/android-bilingual-adaptive-ime, feature/android-keyboard-essentials, personal/android-development]
+    branches: [feat/android-bilingual-adaptive-ime, feature/android-keyboard-essentials, feature/android-personal-info-settings, personal/android-development]
     paths:
       - 'android/**'
       - 'src/Meltype.Core/**'
