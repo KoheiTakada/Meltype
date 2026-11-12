@@ -779,12 +779,12 @@ class KeyboardService : InputMethodService(), KeyListener {
                 keyboardNotice = this
             }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
                 dp(39), Gravity.CENTER))
-            addView(TextView(this@KeyboardService).apply {
-                text = "▤"
+            // Like Gboard's toolbar: a clipboard silhouette rather than a text glyph.
+            addView(ClipboardIconView(this@KeyboardService, "clipboard",
+                Palette.of(this@KeyboardService).text).apply {
                 contentDescription = "クリップボード履歴"
-                gravity = Gravity.CENTER
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
-                setTextColor(Palette.of(this@KeyboardService).accent)
+                isClickable = true
+                isFocusable = true
                 setOnClickListener { openClipboardPanel() }
                 clipboardButton = this
             }, FrameLayout.LayoutParams(dp(50), dp(46), Gravity.RIGHT or Gravity.CENTER_VERTICAL))
