@@ -284,7 +284,15 @@ class KeyboardService : InputMethodService(), KeyListener {
     private var baseCandidates: List<io.github.ninjin0802.keyboard.engine.Candidate> = emptyList()
     private var baseSelected: Int? = null
     private var inlineAction: (() -> Unit)? = null
-    private val clipboardPillGate = ClipboardPillGate()
+    private val clipboardPillGate by lazy {
+        ClipboardPillGate().apply {
+            restoreConsumedCopyToken(
+                getSharedPreferences("clipboard_pill", android.content.Context.MODE_PRIVATE)
+                    .getString("consumed_copy", null)
+            )
+        }
+    }
+    private val clipboardPillExpiry = Runnable { refreshInlineSuggestion() }
     private val personalKeys = PersonalTypingBuffer()
     private var personalInputStarted = false
     private var keyboardNotice: TextView? = null
@@ -346,11 +354,12 @@ class KeyboardService : InputMethodService(), KeyListener {
             }
             // Show only before the first input in this editor session, or after
             // Delete has actually cleared it. A conversion commit must NOT re-arm.
-            clipboardPillGate.visible() &&
+            lastClipboard != null &&
+                clipboardPillGate.canOffer(
+                    lastClipboard!!.id, lastClipboard!!.createdAt, System.currentTimeMillis()
+                ) &&
                 selStart == selEnd && baseCandidates.isEmpty() &&
-                !coreInput.composing && !session.isComposing &&
-                lastClipboard != null &&
-                System.currentTimeMillis() - lastClipboard!!.createdAt in 0..90_000 -> {
+                !coreInput.composing && !session.isComposing -> {
                 val clip = lastClipboard!!
                 val accepted = !clip.isMedia || currentInputEditorInfo?.contentMimeTypes.orEmpty()
                     .any { ClipDescription.compareMimeTypes(clip.mime, it) }
@@ -366,6 +375,13 @@ class KeyboardService : InputMethodService(), KeyListener {
             else -> null
         }
         bar.show(baseCandidates, baseSelected, inline)
+        mainHandler.removeCallbacks(clipboardPillExpiry)
+        if (inline?.isClipboard == true) {
+            val copiedAt = lastClipboard?.createdAt ?: return
+            val remaining = copiedAt + ClipboardPillGate.MAX_OFFER_AGE_MS -
+                System.currentTimeMillis()
+            if (remaining > 0) mainHandler.postDelayed(clipboardPillExpiry, remaining)
+        }
     }
 
     private fun acceptPersonalCompletion(suggestion: PersonalCompletion) {
@@ -478,7 +494,10 @@ class KeyboardService : InputMethodService(), KeyListener {
             lastScreenshotId = image.id
             // Reuse the exact image-copy/thumbnail path of the existing clipboard manager.
             val copied = runCatching {
-                clipboardStore.capture(ClipData.newUri(contentResolver, "Screenshot", image.uri))
+                clipboardStore.capture(
+                    ClipData.newUri(contentResolver, "Screenshot", image.uri),
+                    observedAtMs = image.capturedAtMs,
+                )
             }.getOrDefault(false)
             if (copied) mainHandler.post {
                 refreshClipboardPanel()
@@ -948,6 +967,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        mainHandler.removeCallbacks(clipboardPillExpiry)
         clipboardPillGate.closed()
         personalKeys.clear()
         personalInputStarted = false
@@ -962,6 +982,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onFinishInput() {
+        mainHandler.removeCallbacks(clipboardPillExpiry)
         clipboardPillGate.closed()
         personalKeys.clear()
         personalInputStarted = false
@@ -1240,13 +1261,22 @@ class KeyboardService : InputMethodService(), KeyListener {
         }
     }
 
+    private fun rememberSuccessfulClipboardPaste(clip: HistoryClip) {
+        val token = clipboardPillGate.pasted(clip.id, clip.createdAt)
+        getSharedPreferences("clipboard_pill", android.content.Context.MODE_PRIVATE)
+            .edit().putString("consumed_copy", token).apply()
+        mainHandler.removeCallbacks(clipboardPillExpiry)
+        refreshInlineSuggestion()
+    }
+
     private fun pasteClipboardItem(clip: HistoryClip) {
         if (policy.isPassword) return
-        clipboardPillGate.edited()
         commitComposing()
         if (!clip.isMedia) {
-            currentInputConnection?.commitText(clip.text, 1)
-            closeClipboardPanel()
+            if (currentInputConnection?.commitText(clip.text, 1) == true) {
+                rememberSuccessfulClipboardPaste(clip)
+                closeClipboardPanel()
+            } else showKeyboardNotice("貼り付けできませんでした")
             return
         }
         val supported = currentInputEditorInfo?.contentMimeTypes.orEmpty()
@@ -1262,8 +1292,10 @@ class KeyboardService : InputMethodService(), KeyListener {
         val done = currentInputConnection?.commitContent(
             content, InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null
         ) == true
-        if (done) closeClipboardPanel()
-        else showKeyboardNotice("貼り付けできませんでした")
+        if (done) {
+            rememberSuccessfulClipboardPaste(clip)
+            closeClipboardPanel()
+        } else showKeyboardNotice("貼り付けできませんでした")
     }
 
     private fun clipboardAction(clip: HistoryClip, action: String) {
