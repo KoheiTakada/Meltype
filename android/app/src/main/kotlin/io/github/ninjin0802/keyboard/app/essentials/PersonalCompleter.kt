@@ -106,7 +106,9 @@ object PersonalCompleter {
         if (stored.length >= 2 && stored != "じゅうしょ" &&
             stored.all { it in 'ぁ'..'ん' || it == 'ー' }) {
             val suffix = if (stored.startsWith(prefecture)) entry.word
-                else addressSuffixes(entry.word).lastOrNull() ?: entry.word
+                else addressSuffixes(entry.word).drop(1).lastOrNull {
+                    it.firstOrNull()?.isLetter() == true
+                } ?: entry.word
             targets += Target(stored, suffix)
         }
         return targets
