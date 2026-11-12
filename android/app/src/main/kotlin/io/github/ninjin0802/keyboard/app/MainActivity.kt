@@ -613,22 +613,37 @@ class MainActivity : Activity() {
                 else -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS
             }
         }
+        val townReading = if (personalKind == "address") {
+            AppChrome.input(this, "例：かくうまち",
+                original?.reading?.takeUnless { it == "じゅうしょ" ||
+                    it == PersonalCompleter.prefectureReading(original.word) }.orEmpty())
+        } else null
         card(content, name) {
             setPadding(dp(14), dp(12), dp(14), dp(14))
             addView(text("登録内容", 13f, muted = true))
             addView(value, LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(8) })
+            if (townReading != null) {
+                addView(text("町名の読み（任意）", 13f, muted = true), LinearLayout.LayoutParams(-1, -2).apply {
+                    topMargin = dp(16)
+                })
+                addView(townReading, LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(8) })
+            }
         }
         hint(content, when (personalKind) {
             "email" -> "入力途中で補完します。候補は @ から先が小さい2行目になります。"
             "phone" -> "フルサイズの1行候補。3-4-4に分かれた入力欄では続きを提示します。"
-            else -> "都道府県、市区町村、町名から補完します。町名以降を小さい2行目に表示します。"
+            else -> "都道府県名は自動で読みを補完します。町名からも入力したい場合は、町名の読みを登録してください。候補は2行表示です。"
         })
         val error = formError(content)
         content.addView(AppChrome.action(this, "保存") {
             val word = value.text.toString().trim()
             val valid = PersonalCompleter.kindOf(word) == personalKind
-            val ok = valid && if (original == null) userWords.add(reading, word)
-                else userWords.edit(original, original.reading, word)
+            val savedReading = if (personalKind == "address") {
+                townReading?.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: PersonalCompleter.prefectureReading(word) ?: reading
+            } else original?.reading ?: reading
+            val ok = valid && if (original == null) userWords.add(savedReading, word)
+                else userWords.edit(original, savedReading, word)
             if (ok) navigate(Page.PERSONAL)
             else {
                 error.text = "形式を確認してください。"
