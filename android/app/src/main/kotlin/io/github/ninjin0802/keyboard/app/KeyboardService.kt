@@ -101,6 +101,7 @@ import io.github.ninjin0802.keyboard.app.clipboard.ClipboardProcessing
 import io.github.ninjin0802.keyboard.app.clipboard.HistoryClip
 import io.github.ninjin0802.keyboard.app.essentials.DictionaryAdapter
 import io.github.ninjin0802.keyboard.app.essentials.PersonalCompleter
+import io.github.ninjin0802.keyboard.app.essentials.PersonalTypingBuffer
 import io.github.ninjin0802.keyboard.app.essentials.PersonalCompletion
 import io.github.ninjin0802.keyboard.app.essentials.PhoneFieldContinuation
 import java.util.concurrent.ThreadPoolExecutor
@@ -282,6 +283,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     private var baseCandidates: List<io.github.ninjin0802.keyboard.engine.Candidate> = emptyList()
     private var baseSelected: Int? = null
     private var inlineAction: (() -> Unit)? = null
+    private val personalKeys = PersonalTypingBuffer()
     private var keyboardNotice: TextView? = null
     private val dismissNotice = Runnable { keyboardNotice?.visibility = View.GONE }
 
@@ -311,8 +313,11 @@ class KeyboardService : InputMethodService(), KeyListener {
         val privateField = policy.isPassword || fieldTraits.contains("Private") || !fieldReadable
         val before = if (privateField) null
             else currentInputConnection?.getTextBeforeCursor(160, 0)?.toString()
-        val entry: PersonalCompletion? = if (before.isNullOrEmpty()) null
-            else PersonalCompleter.suggest(before, dictionary.list())
+        // Core can live-convert the visible text to kanji. The raw keys remain
+        // the matching source; editor text is only the fallback for kana flick input.
+        val typed = personalKeys.current().ifEmpty { before.orEmpty() }
+        val entry: PersonalCompletion? = if (before.isNullOrEmpty() || typed.isBlank()) null
+            else PersonalCompleter.suggest(typed, dictionary.list())
         val inline: BarSuggestion? = when {
             privateField || before == null -> null
             entry != null -> {
@@ -329,9 +334,13 @@ class KeyboardService : InputMethodService(), KeyListener {
                 inlineAction = { acceptPhonePart(part) }
                 BarSuggestion(part, SuggestionKind.PHONE_SEGMENT)
             }
-            // Gboard's paste chip can appear after already committed text, not just
-            // in a completely empty editor. Suppress it while Core is composing.
-            baseCandidates.isEmpty() && !coreInput.composing && lastClipboard != null &&
+            // Clipboard is an idle-state action, not a conversion prediction:
+            // only when the entire field is empty (at opening or after clearing it).
+            before.isEmpty() &&
+                currentInputConnection?.getTextAfterCursor(1, 0)?.isEmpty() == true &&
+                selStart == selEnd &&
+                baseCandidates.isEmpty() && !coreInput.composing &&
+                !session.isComposing && lastClipboard != null &&
                 System.currentTimeMillis() - lastClipboard!!.createdAt in 0..90_000 -> {
                 val clip = lastClipboard!!
                 val accepted = !clip.isMedia || currentInputEditorInfo?.contentMimeTypes.orEmpty()
@@ -351,16 +360,38 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     private fun acceptPersonalCompletion(suggestion: PersonalCompletion) {
-        // Avoid accidentally replacing altered or unrelated text.
-        commitComposing()
         val connection = currentInputConnection ?: return
-        val before = connection.getTextBeforeCursor(suggestion.typed.length, 0)?.toString() ?: return
-        if (!before.endsWith(suggestion.typed, ignoreCase = suggestion.replacement.contains('@'))) return
-        connection.beginBatchEdit()
-        try {
-            connection.deleteSurroundingText(suggestion.typed.length, 0)
-            connection.commitText(suggestion.replacement, 1)
-        } finally { connection.endBatchEdit() }
+        val composing = coreInput.shown
+        if (composing.isNotEmpty()) {
+            // Core's composing string can already be kanji. Replace the IME-owned
+            // composition atomically rather than deleting the raw romanized key count.
+            val live = connection.getTextBeforeCursor(composing.length, 0)?.toString() ?: return
+            if (!live.endsWith(composing)) return
+            connection.beginBatchEdit()
+            try {
+                connection.setComposingText(suggestion.replacement, 1)
+                connection.finishComposingText()
+            } finally {
+                connection.endBatchEdit()
+            }
+            // Tell the Core that the front-end/app committed its own completion.
+            leaveCore(focusLeft = false, field = true)
+        } else {
+            // No composing region: only replace the actual matching text, never
+            // unrelated content even if a previous raw key buffer is still present.
+            val typed = suggestion.typed
+            val visible = connection.getTextBeforeCursor(typed.length, 0)?.toString() ?: return
+            if (!visible.endsWith(typed, ignoreCase = suggestion.kind == "email")) return
+            commitComposing()
+            connection.beginBatchEdit()
+            try {
+                connection.deleteSurroundingText(typed.length, 0)
+                connection.commitText(suggestion.replacement, 1)
+            } finally {
+                connection.endBatchEdit()
+            }
+        }
+        personalKeys.clear()
         caretWatch.lose()
         suggestedPhonePart = null
         displayCandidates(emptyList(), null)
@@ -858,6 +889,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         // Restarted in the same editor without finishing it: the editor kept the composing text.
         if (coreInput.composing) leaveCore(focusLeft = false)
         policy = fieldPolicy(info.inputType, info.imeOptions)
+        personalKeys.clear()
         phoneLeaveRecordedForField = false
         suggestedPhonePart = phoneFields.next(info.packageName, SystemClock.elapsedRealtime(), restarting)
         clipboardButton?.visibility = if (policy.isPassword) View.GONE else View.VISIBLE
@@ -893,6 +925,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        personalKeys.clear()
         rememberPhoneField()
         keyboardView?.cancelTouch()
         languagePopup.dismiss()
@@ -904,6 +937,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onFinishInput() {
+        personalKeys.clear()
         rememberPhoneField()
         keyboardView?.cancelTouch()
         emojiPanel?.cancelTouch()
@@ -930,12 +964,16 @@ class KeyboardService : InputMethodService(), KeyListener {
         selStart = newSelStart
         selEnd = newSelEnd
         if (bridge.onSelectionChanged(newSelStart, newSelEnd, candidatesStart, candidatesEnd)) {
+            personalKeys.clear()
             // 利用者がカーソルを動かした、またはアプリが文章を書き換えた。出ている文字はそのまま確定させる。
             dropComposition()
             currentInputConnection?.finishComposingText()
         }
         // Core の書き換えでないキャレットの移動は、Core に知らせる（変換中なら、出ている文字のまま確定させる）。
-        if (!caretWatch.isOwn(newSelStart, newSelEnd, candidatesEnd, coreInput.composing)) caretMovedOutside()
+        if (!caretWatch.isOwn(newSelStart, newSelEnd, candidatesEnd, coreInput.composing)) {
+            personalKeys.clear()
+            caretMovedOutside()
+        }
         refreshInlineSuggestion()
     }
 
@@ -958,6 +996,13 @@ class KeyboardService : InputMethodService(), KeyListener {
         val start = System.nanoTime()
         connection?.beginBatchEdit()
         try {
+            when (action) {
+                is KeyAction.Romaji -> personalKeys.typed(action.char.toString())
+                is KeyAction.Text -> personalKeys.typed(action.text)
+                KeyAction.Delete -> personalKeys.deleted()
+                KeyAction.Shift -> Unit
+                else -> personalKeys.clear()
+            }
             handleKey(action, direction, timeMs)
         } finally {
             connection?.endBatchEdit()
