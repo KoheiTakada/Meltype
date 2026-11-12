@@ -361,38 +361,46 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     private fun acceptPersonalCompletion(suggestion: PersonalCompletion) {
         val connection = currentInputConnection ?: return
-        val composing = coreInput.shown
-        if (composing.isNotEmpty()) {
-            // Core's composing string can already be kanji. Replace the IME-owned
-            // composition atomically rather than deleting the raw romanized key count.
-            val live = connection.getTextBeforeCursor(composing.length, 0)?.toString() ?: return
-            if (!live.endsWith(composing)) return
-            connection.beginBatchEdit()
-            try {
-                connection.setComposingText(suggestion.replacement, 1)
-                connection.finishComposingText()
-            } finally {
-                connection.endBatchEdit()
-            }
-            // Tell the Core that the front-end/app committed its own completion.
+        val selection = connection.getExtractedText(
+            android.view.inputmethod.ExtractedTextRequest(), 0)
+        val cursor = if (selection != null && selection.selectionStart == selection.selectionEnd) {
+            selection.startOffset + selection.selectionStart
+        } else selStart
+        val owned = personalKeys.replacedUtf16Length(cursor)
+        val prefix = coreInput.shown
+        val deleteLength = owned ?: when {
+            prefix.isNotEmpty() &&
+                connection.getTextBeforeCursor(prefix.length, 0)?.toString()?.endsWith(prefix) == true ->
+                prefix.length
+            connection.getTextBeforeCursor(suggestion.typed.length, 0)?.toString()
+                ?.endsWith(suggestion.typed, ignoreCase = suggestion.kind == "email") == true ->
+                suggestion.typed.length
+            else -> return
+        }
+        // Refuse to touch any content outside the short region typed in this field.
+        val before = connection.getTextBeforeCursor(deleteLength, 0)?.toString() ?: return
+        if (before.length != deleteLength || deleteLength !in 1..160) return
+
+        val hadCoreComposition = coreInput.composing
+        personalKeys.clear()
+        connection.beginBatchEdit()
+        try {
+            // Core may have auto-committed a kanji prefix before the current
+            // composition. Remove *all* text entered since the first key.
+            connection.finishComposingText()
+            connection.deleteSurroundingText(deleteLength, 0)
+            connection.commitText(suggestion.replacement, 1)
+        } finally {
+            connection.endBatchEdit()
+        }
+        caretWatch.lose()
+        if (hadCoreComposition) {
+            // The app has committed its own replacement, not a Core candidate.
             leaveCore(focusLeft = false, field = true)
         } else {
-            // No composing region: only replace the actual matching text, never
-            // unrelated content even if a previous raw key buffer is still present.
-            val typed = suggestion.typed
-            val visible = connection.getTextBeforeCursor(typed.length, 0)?.toString() ?: return
-            if (!visible.endsWith(typed, ignoreCase = suggestion.kind == "email")) return
-            commitComposing()
-            connection.beginBatchEdit()
-            try {
-                connection.deleteSurroundingText(typed.length, 0)
-                connection.commitText(suggestion.replacement, 1)
-            } finally {
-                connection.endBatchEdit()
-            }
+            if (session.isComposing) dropComposition()
+            caretMovedOutside()
         }
-        personalKeys.clear()
-        caretWatch.lose()
         suggestedPhonePart = null
         displayCandidates(emptyList(), null)
     }
@@ -679,6 +687,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     private fun buildNormalKeyboardView(): View {
         val start = System.nanoTime()
         val bar = CandidateBarView(this).also { it.onInlinePick = { inlineAction?.invoke() }; it.onPick = { index ->
+            personalKeys.clear()
             val instance = core
             if (instance != null && nav.current == LayoutId.ROMAJI) {
                 val choice = coreInput.choices.getOrNull(index)
@@ -997,8 +1006,8 @@ class KeyboardService : InputMethodService(), KeyListener {
         connection?.beginBatchEdit()
         try {
             when (action) {
-                is KeyAction.Romaji -> personalKeys.typed(action.char.toString())
-                is KeyAction.Text -> personalKeys.typed(action.text)
+                is KeyAction.Romaji -> personalKeys.typed(action.char.toString(), selStart)
+                is KeyAction.Text -> personalKeys.typed(action.text, selStart)
                 KeyAction.Delete -> personalKeys.deleted()
                 KeyAction.Shift -> Unit
                 else -> personalKeys.clear()
