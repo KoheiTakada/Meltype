@@ -236,10 +236,10 @@ class SettingsScreenDeviceTest {
     @Test fun emailAndClipboardHaveDistinctGboardLikeCandidateSurfaces() {
         instrumentation.runOnMainSync {
             val bar = CandidateBarView(instrumentation.targetContext)
-            bar.show(emptyList(), null, BarSuggestion("kohei.t0312@gmail.com", SuggestionKind.EMAIL))
+            bar.show(emptyList(), null, BarSuggestion("sample.user@example.com", SuggestionKind.EMAIL))
             val row = bar.getChildAt(0) as LinearLayout
             val email = row.getChildAt(0) as TextView
-            assertEquals("kohei.t0312\n@gmail.com", email.text.toString())
+            assertEquals("sample.user\n@example.com", email.text.toString())
             val text = email.text as Spanned
             val spans = text.getSpans(0, text.length, RelativeSizeSpan::class.java)
             assertTrue("The domain must use a smaller font", spans.any { it.sizeChange < 1f })
