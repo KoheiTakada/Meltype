@@ -53,8 +53,14 @@ class ClipboardHistoryStore(private val app: Context) :
     fun isSensitive(clip: ClipData): Boolean =
         clip.description.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
 
-    fun capture(clip: ClipData): Boolean {
+    fun capture(clip: ClipData, observedAtMs: Long? = null): Boolean {
         if (isSensitive(clip)) return false
+        // Android's clipboard timestamp is the moment of copying, NOT the moment
+        // the IME observes the clipboard again after opening or changing fields.
+        // Do not renew the five-minute suggestion window during an ordinary refocus.
+        val now = System.currentTimeMillis()
+        val copiedAt = (observedAtMs ?: clip.description.timestamp)
+            .takeIf { it in 1L..now } ?: now
         var saved = false
         for (index in 0 until minOf(clip.itemCount, 8)) {
             val item = clip.getItemAt(index)
@@ -75,7 +81,7 @@ class ClipboardHistoryStore(private val app: Context) :
                 val stored = copyToPrivateFile(uri)
                 if (stored != null) {
                     val hash = sha256(stored.readBytes())
-                    insert(kind, name, null, type, name, stored.name, kind + ":" + hash)
+                    insert(kind, name, null, type, name, stored.name, kind + ":" + hash, copiedAt)
                     saved = true
                     continue
                 }
@@ -90,7 +96,7 @@ class ClipboardHistoryStore(private val app: Context) :
             }
             val content = plain.take(MAX_TEXT)
             val fingerprint = kind + ":" + sha256((if (html == null) content else content + "\u0000" + html.take(MAX_TEXT)).toByteArray())
-            insert(kind, plain.take(MAX_TEXT), html?.take(MAX_TEXT), "text/plain", null, null, fingerprint)
+            insert(kind, plain.take(MAX_TEXT), html?.take(MAX_TEXT), "text/plain", null, null, fingerprint, copiedAt)
             saved = true
         }
         if (saved) prune()
@@ -111,6 +117,7 @@ class ClipboardHistoryStore(private val app: Context) :
     private fun insert(
         kind: String, text: String, html: String?, mime: String,
         fileName: String?, storedName: String?, fingerprint: String,
+        copiedAt: Long = System.currentTimeMillis(),
     ): Long {
         val db = writableDatabase
         db.beginTransaction()
@@ -124,7 +131,7 @@ class ClipboardHistoryStore(private val app: Context) :
                     // Keep existing IDs: editors may still hold a URI grant to this row.
                     if (storedName != null && oldName != storedName) ownedFile(storedName)?.delete()
                     val updated = android.content.ContentValues().apply {
-                        put("created_at", System.currentTimeMillis())
+                        put("created_at", copiedAt)
                     }
                     db.update("clips", updated, "id = ?", arrayOf(id.toString()))
                     db.setTransactionSuccessful()
@@ -138,7 +145,7 @@ class ClipboardHistoryStore(private val app: Context) :
                 put("mime", mime)
                 put("file_name", fileName)
                 put("stored_name", storedName)
-                put("created_at", System.currentTimeMillis())
+                put("created_at", copiedAt)
                 put("fingerprint", fingerprint)
             }
             val id = db.insertOrThrow("clips", null, values)
