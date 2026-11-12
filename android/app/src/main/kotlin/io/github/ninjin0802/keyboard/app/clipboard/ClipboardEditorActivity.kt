@@ -1,58 +1,77 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 KoheiTakada
 package io.github.ninjin0802.keyboard.app.clipboard
 
 import android.app.Activity
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
-import android.widget.Button
-import android.widget.EditText
+import android.view.View
 import android.widget.LinearLayout
-import android.widget.TextView
+import android.widget.ScrollView
+import io.github.ninjin0802.keyboard.app.AppChrome
 
-/** Editing is intentionally a normal Activity, so text input never traps IME focus. */
+/** Inline Meltype editing surface, with no system modal or default Android button chrome. */
 class ClipboardEditorActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val id = intent.getLongExtra(EXTRA_ID, -1L)
+        val clipId = intent.getLongExtra(EXTRA_ID, -1L)
         val store = ClipboardHistoryStore(this)
-        val original = store.get(id)
-        if (original == null || original.isMedia) {
-            finish()
-            return
-        }
-        val density = resources.displayMetrics.density
-        fun dp(n: Int) = (n * density + 0.5f).toInt()
+        val original = store.get(clipId)
+        if (original == null || original.isMedia) { finish(); return }
+        val colors = AppChrome.colors(this)
+        fun dp(n: Int) = AppChrome.dp(this, n)
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(24), dp(20), dp(20))
+            setBackgroundColor(colors.background)
         }
-        root.addView(TextView(this).apply {
-            text = "クリップボードの内容を編集"
-            textSize = 19f
-        })
-        val editor = EditText(this).apply {
-            setText(original.text)
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(10), dp(20), dp(12))
+            addView(AppChrome.action(this@ClipboardEditorActivity, "‹", filled = false) {
+                finish()
+            }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(15) })
+            addView(AppChrome.text(this@ClipboardEditorActivity, "クリップボードを編集",
+                20f, strong = true))
+        }
+        root.addView(header)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), 0, dp(20), dp(20))
+        }
+        content.addView(AppChrome.text(this, "内容", 13f, muted = true))
+        val editor = AppChrome.input(this, "テキストを入力", original.text, multiline = true).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             gravity = Gravity.TOP
-            setSelection(text.length)
+            setHorizontallyScrolling(false)
         }
-        root.addView(editor, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
-        ))
-        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        buttons.addView(Button(this).apply {
-            text = "キャンセル"
-            setOnClickListener { finish() }
-        }, LinearLayout.LayoutParams(0, dp(52), 1f))
-        buttons.addView(Button(this).apply {
-            text = "保存"
-            setOnClickListener {
-                if (store.edit(id, editor.text.toString())) finish()
-                else editor.error = "空文字列や重複する内容は保存できません"
-            }
-        }, LinearLayout.LayoutParams(0, dp(52), 1f))
-        root.addView(buttons)
+        content.addView(editor, LinearLayout.LayoutParams(-1, 0, 1f).apply {
+            topMargin = dp(10); bottomMargin = dp(15)
+        })
+        val error = AppChrome.text(this, "", 13f).apply {
+            visibility = View.GONE
+            setTextColor(colors.danger)
+        }
+        content.addView(error)
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(AppChrome.action(this@ClipboardEditorActivity, "キャンセル", filled = false) {
+                finish()
+            }, LinearLayout.LayoutParams(0, dp(52), 1f).apply { marginEnd = dp(8) })
+            addView(AppChrome.action(this@ClipboardEditorActivity, "保存") {
+                val saved = store.edit(clipId, editor.text.toString())
+                if (saved) finish()
+                else {
+                    error.text = "空欄または重複する内容は保存できません。"
+                    error.visibility = View.VISIBLE
+                }
+            }, LinearLayout.LayoutParams(0, dp(52), 1f))
+        }
+        content.addView(actions)
+        root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        AppChrome.protectBars(this, root)
         setContentView(root)
     }
 

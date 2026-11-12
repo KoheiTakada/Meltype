@@ -5,6 +5,8 @@ package io.github.ninjin0802.keyboard.app
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
+import android.database.ContentObserver
+import android.provider.MediaStore
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
@@ -30,14 +32,15 @@ import android.view.inputmethod.InputContentInfo
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import android.util.TypedValue
 import android.view.Gravity
+import io.github.ninjin0802.keyboard.app.core.CandidateTap
 import io.github.ninjin0802.keyboard.app.core.CaretWatch
 import io.github.ninjin0802.keyboard.app.core.CoreInputAdapter
 import io.github.ninjin0802.keyboard.app.core.CoreMozcCallbacks
 import io.github.ninjin0802.keyboard.app.core.ImeFieldFacts
 import io.github.ninjin0802.keyboard.app.core.ImeJson
+import io.github.ninjin0802.keyboard.app.core.ImeView
 import io.github.ninjin0802.keyboard.app.core.MeltypeCoreHost
 import io.github.ninjin0802.keyboard.app.core.coreDataDirectory
 import io.github.ninjin0802.keyboard.app.emoji.EmojiCatalog
@@ -64,6 +67,8 @@ import io.github.ninjin0802.keyboard.app.layout.Layouts
 import io.github.ninjin0802.keyboard.app.layout.withoutEmoji
 import io.github.ninjin0802.keyboard.app.layout.ScreenCoordinator
 import io.github.ninjin0802.keyboard.app.view.BottomInsets
+import io.github.ninjin0802.keyboard.app.view.BarSuggestion
+import io.github.ninjin0802.keyboard.app.view.SuggestionKind
 import io.github.ninjin0802.keyboard.app.view.CandidateBarView
 import io.github.ninjin0802.keyboard.app.view.FlickPopupView
 import io.github.ninjin0802.keyboard.app.view.KeyListener
@@ -72,6 +77,7 @@ import io.github.ninjin0802.keyboard.app.view.LanguagePickerPopup
 import io.github.ninjin0802.keyboard.app.view.ImeGlassSurface
 import io.github.ninjin0802.keyboard.app.view.KeyboardTopEdgeHighlight
 import io.github.ninjin0802.keyboard.app.view.Palette
+import io.github.ninjin0802.keyboard.app.AppChrome
 import io.github.ninjin0802.keyboard.app.view.bottomPaddingPx
 import io.github.ninjin0802.keyboard.engine.Clause
 import io.github.ninjin0802.keyboard.engine.Converter
@@ -92,10 +98,13 @@ import io.github.ninjin0802.keyboard.app.clipboard.ClipboardEditorActivity
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardLinkPreviewLoader
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardPanelView
+import io.github.ninjin0802.keyboard.app.clipboard.ClipboardPillGate
+import io.github.ninjin0802.keyboard.app.clipboard.RecentScreenshotSource
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardProcessing
 import io.github.ninjin0802.keyboard.app.clipboard.HistoryClip
 import io.github.ninjin0802.keyboard.app.essentials.DictionaryAdapter
 import io.github.ninjin0802.keyboard.app.essentials.PersonalCompleter
+import io.github.ninjin0802.keyboard.app.essentials.PersonalTypingBuffer
 import io.github.ninjin0802.keyboard.app.essentials.PersonalCompletion
 import io.github.ninjin0802.keyboard.app.essentials.PhoneFieldContinuation
 import java.util.concurrent.ThreadPoolExecutor
@@ -256,6 +265,12 @@ class KeyboardService : InputMethodService(), KeyListener {
     /** How many caret moves were taken as made by the user or the app (smoke test only). */
     internal fun outsideCaretMovesForSmokeTest(): Int = outsideCaretMoves
 
+    /** Core conversion state exposed to instrumentation only. */
+    internal fun coreViewForSmokeTest(): ImeView? = coreInput.view
+
+    /** Candidate bar exposed to actual on-device touch QA only. */
+    internal fun candidateBarForSmokeTest(): CandidateBarView? = candidateBar
+
     /** The keyboard's root view, to find the clipboard controls by their description (smoke test only). */
     internal fun inputRootForSmokeTest(): View? = inputRoot
 
@@ -277,6 +292,29 @@ class KeyboardService : InputMethodService(), KeyListener {
     private var baseCandidates: List<io.github.ninjin0802.keyboard.engine.Candidate> = emptyList()
     private var baseSelected: Int? = null
     private var inlineAction: (() -> Unit)? = null
+    private val clipboardPillGate by lazy {
+        ClipboardPillGate().apply {
+            restoreConsumedCopyToken(
+                getSharedPreferences("clipboard_pill", android.content.Context.MODE_PRIVATE)
+                    .getString("consumed_copy", null)
+            )
+        }
+    }
+    private val clipboardPillExpiry = Runnable { refreshInlineSuggestion() }
+    private val personalKeys = PersonalTypingBuffer()
+    private var personalInputStarted = false
+    private var keyboardNotice: TextView? = null
+    private val dismissNotice = Runnable { keyboardNotice?.visibility = View.GONE }
+
+    /** Compact in-IME feedback instead of a system Toast popup. */
+    private fun showKeyboardNotice(message: String) {
+        val notice = keyboardNotice ?: return
+        notice.text = message
+        notice.visibility = View.VISIBLE
+        mainHandler.removeCallbacks(dismissNotice)
+        mainHandler.postDelayed(dismissNotice, 3000L)
+    }
+
 
     /** Supplemental UI never enters the native Core, Mozc, or their candidate-index contract. */
     private fun displayCandidates(
@@ -288,61 +326,121 @@ class KeyboardService : InputMethodService(), KeyListener {
         refreshInlineSuggestion()
     }
 
+    private fun editorIsCompletelyEmpty(): Boolean {
+        val connection = currentInputConnection ?: return false
+        return connection.getTextBeforeCursor(1, 0)?.isEmpty() == true &&
+            connection.getTextAfterCursor(1, 0)?.isEmpty() == true &&
+            !coreInput.composing && !session.isComposing
+    }
+
     private fun refreshInlineSuggestion() {
         val bar = candidateBar ?: return
         inlineAction = null
         val privateField = policy.isPassword || fieldTraits.contains("Private") || !fieldReadable
         val before = if (privateField) null
             else currentInputConnection?.getTextBeforeCursor(160, 0)?.toString()
-        val entry: PersonalCompletion? = if (before.isNullOrEmpty()) null
-            else PersonalCompleter.suggest(before, dictionary.list())
-        var thumbnail: Bitmap? = null
-        val inline = when {
+        // Core can live-convert the visible text to kanji. The raw keys remain
+        // the matching source; editor text is only the fallback for kana flick input.
+        val typed = if (personalInputStarted) personalKeys.current().ifEmpty { before.orEmpty() } else ""
+        val entry: PersonalCompletion? = if (before.isNullOrEmpty() || typed.isBlank()) null
+            else PersonalCompleter.suggest(typed, dictionary.list())
+        val inline: BarSuggestion? = when {
             privateField || before == null -> null
             entry != null -> {
                 inlineAction = { acceptPersonalCompletion(entry) }
-                entry.display
+                val kind = when (entry.kind) {
+                    "email" -> SuggestionKind.EMAIL
+                    "address" -> SuggestionKind.ADDRESS
+                    else -> SuggestionKind.PHONE
+                }
+                BarSuggestion(entry.display, kind)
             }
             before.isEmpty() && !suggestedPhonePart.isNullOrBlank() -> {
                 val part = suggestedPhonePart!!
                 inlineAction = { acceptPhonePart(part) }
-                part
+                BarSuggestion(part, SuggestionKind.PHONE_SEGMENT)
             }
-            before.isEmpty() && baseCandidates.isEmpty() && lastClipboard != null &&
-                System.currentTimeMillis() - lastClipboard!!.createdAt in 0..90_000 -> {
+            // Show only before the first input in this editor session, or after
+            // Delete has actually cleared it. A conversion commit must NOT re-arm.
+            lastClipboard != null &&
+                clipboardPillGate.canOffer(
+                    lastClipboard!!.id, lastClipboard!!.createdAt, System.currentTimeMillis()
+                ) &&
+                selStart == selEnd && baseCandidates.isEmpty() &&
+                !coreInput.composing && !session.isComposing -> {
                 val clip = lastClipboard!!
                 val accepted = !clip.isMedia || currentInputEditorInfo?.contentMimeTypes.orEmpty()
                     .any { ClipDescription.compareMimeTypes(clip.mime, it) }
                 if (accepted) {
                     inlineAction = { pasteClipboardItem(clip); refreshInlineSuggestion() }
                     if (clip.kind == "image") {
-                        thumbnail = lastClipboardThumbnail
-                        "スクリーンショット"
-                    } else clip.text.take(40)
+                        BarSuggestion("Screenshot", SuggestionKind.CLIPBOARD_IMAGE, lastClipboardThumbnail)
+                    } else {
+                        BarSuggestion(clip.text.take(70), SuggestionKind.CLIPBOARD_TEXT)
+                    }
                 } else null
             }
             else -> null
         }
-        bar.show(baseCandidates, baseSelected, inline, thumbnail)
+        bar.show(baseCandidates, baseSelected, inline)
+        mainHandler.removeCallbacks(clipboardPillExpiry)
+        if (inline?.isClipboard == true) {
+            val copiedAt = lastClipboard?.createdAt ?: return
+            val remaining = copiedAt + ClipboardPillGate.MAX_OFFER_AGE_MS -
+                System.currentTimeMillis()
+            if (remaining > 0) mainHandler.postDelayed(clipboardPillExpiry, remaining)
+        }
     }
 
     private fun acceptPersonalCompletion(suggestion: PersonalCompletion) {
-        // Avoid accidentally replacing altered or unrelated text.
-        commitComposing()
+        clipboardPillGate.edited()
         val connection = currentInputConnection ?: return
-        val before = connection.getTextBeforeCursor(suggestion.typed.length, 0)?.toString() ?: return
-        if (!before.endsWith(suggestion.typed, ignoreCase = suggestion.replacement.contains('@'))) return
+        val selection = connection.getExtractedText(
+            android.view.inputmethod.ExtractedTextRequest(), 0)
+        val cursor = if (selection != null && selection.selectionStart == selection.selectionEnd) {
+            selection.startOffset + selection.selectionStart
+        } else selStart
+        val owned = personalKeys.replacedUtf16Length(cursor)
+        val prefix = coreInput.shown
+        val deleteLength = owned ?: when {
+            prefix.isNotEmpty() &&
+                connection.getTextBeforeCursor(prefix.length, 0)?.toString()?.endsWith(prefix) == true ->
+                prefix.length
+            connection.getTextBeforeCursor(suggestion.typed.length, 0)?.toString()
+                ?.endsWith(suggestion.typed, ignoreCase = suggestion.kind == "email") == true ->
+                suggestion.typed.length
+            else -> return
+        }
+        // Refuse to touch any content outside the short region typed in this field.
+        val before = connection.getTextBeforeCursor(deleteLength, 0)?.toString() ?: return
+        if (before.length != deleteLength || deleteLength !in 1..160) return
+
+        val hadCoreComposition = coreInput.composing
+        personalKeys.clear()
         connection.beginBatchEdit()
         try {
-            connection.deleteSurroundingText(suggestion.typed.length, 0)
+            // Core may have auto-committed a kanji prefix before the current
+            // composition. Remove *all* text entered since the first key.
+            connection.finishComposingText()
+            connection.deleteSurroundingText(deleteLength, 0)
             connection.commitText(suggestion.replacement, 1)
-        } finally { connection.endBatchEdit() }
+        } finally {
+            connection.endBatchEdit()
+        }
         caretWatch.lose()
+        if (hadCoreComposition) {
+            // The app has committed its own replacement, not a Core candidate.
+            leaveCore(focusLeft = false, field = true)
+        } else {
+            if (session.isComposing) dropComposition()
+            caretMovedOutside()
+        }
         suggestedPhonePart = null
         displayCandidates(emptyList(), null)
     }
 
     private fun acceptPhonePart(part: String) {
+        clipboardPillGate.edited()
         if (currentInputConnection?.getTextBeforeCursor(1, 0)?.isNotEmpty() == true) return
         currentInputConnection?.commitText(part, 1)
         caretWatch.lose()
@@ -383,6 +481,67 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     private val clipboardWorker = Executors.newSingleThreadExecutor()
     private val clipboardStore by lazy { ClipboardHistoryStore(applicationContext) }
+    private val screenshots by lazy { RecentScreenshotSource(applicationContext) }
+    private var lastScreenshotId = -1L
+    private var screenshotObserverRegistered = false
+    private val screenshotObserver by lazy {
+        object : ContentObserver(mainHandler) {
+            override fun onChange(selfChange: Boolean) {
+                super.onChange(selfChange)
+                detectRecentScreenshot()
+            }
+        }
+    }
+
+    private fun detectRecentScreenshot() {
+        if (!screenshots.enabled() || clipboardWorker.isShutdown ||
+            !coreInField || policy.isPassword || fieldTraits.contains("Private")) return
+        clipboardWorker.execute {
+            val image = screenshots.newestRecent() ?: return@execute
+            if (image.id == lastScreenshotId) return@execute
+            lastScreenshotId = image.id
+            // Reuse the exact image-copy/thumbnail path of the existing clipboard manager.
+            val copied = runCatching {
+                clipboardStore.capture(
+                    ClipData.newUri(contentResolver, "Screenshot", image.uri),
+                    observedAtMs = image.capturedAtMs,
+                )
+            }.getOrDefault(false)
+            if (copied) mainHandler.post {
+                refreshClipboardPanel()
+                updateLatestClipboardSuggestion()
+            }
+        }
+    }
+
+    private fun startScreenshotObserver() {
+        if (!screenshots.enabled() || screenshotObserverRegistered ||
+            !coreInField || policy.isPassword || fieldTraits.contains("Private")) return
+        try {
+            contentResolver.registerContentObserver(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                true, screenshotObserver)
+            screenshotObserverRegistered = true
+            detectRecentScreenshot()
+        } catch (error: SecurityException) {
+            Log.w(TAG, "Screenshot observer permission unavailable", error)
+        }
+    }
+
+    private fun stopScreenshotObserver() {
+        if (!screenshotObserverRegistered) return
+        contentResolver.unregisterContentObserver(screenshotObserver)
+        screenshotObserverRegistered = false
+    }
+
+    override fun onWindowShown() {
+        super.onWindowShown()
+        startScreenshotObserver()
+    }
+
+    override fun onWindowHidden() {
+        stopScreenshotObserver()
+        super.onWindowHidden()
+    }
     private var clipboardManager: ClipboardManager? = null
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
         if (policy.isPassword) return@OnPrimaryClipChangedListener
@@ -498,6 +657,8 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onDestroy() {
+        stopScreenshotObserver()
+        mainHandler.removeCallbacks(dismissNotice)
         if (activeForSmokeTest?.get() === this) activeForSmokeTest = null
         clipboardManager?.removePrimaryClipChangedListener(clipboardListener)
         clipboardWorker.shutdown()
@@ -528,47 +689,35 @@ class KeyboardService : InputMethodService(), KeyListener {
         buildEmergencyKeyboardView()
     }
 
-    /** No native converter or keyboard assets are used in this emergency UI. */
+    /** Emergency exits keep working even if the converter cannot be initialized. */
     private fun buildEmergencyKeyboardView(): View {
-        val pad = (16 * resources.displayMetrics.density).toInt()
+        val surface = AppChrome.colors(this)
+        val space = AppChrome.dp(this, 15)
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-            setBackgroundColor(Color.WHITE)
-            addView(TextView(this@KeyboardService).apply {
-                text = "Meltype を起動できませんでした"
-                textSize = 16f
-                setTextColor(Color.BLACK)
-            })
-            addView(TextView(this@KeyboardService).apply {
-                text = "別のキーボードに切り替える"
-                contentDescription = text
-                textSize = 16f
-                setTextColor(Color.BLUE)
-                setPadding(0, pad, 0, pad)
-                isClickable = true
-                setOnClickListener {
-                    try {
-                        (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
-                            .showInputMethodPicker()
-                    } catch (error: RuntimeException) {
-                        Log.w(TAG, "Input method picker unavailable", error)
-                        startActivity(Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    }
-                }
-            })
-            addView(TextView(this@KeyboardService).apply {
-                text = "Android のキーボード設定"
-                contentDescription = text
-                textSize = 14f
-                setTextColor(Color.BLUE)
-                setPadding(0, pad, 0, pad)
-                isClickable = true
-                setOnClickListener {
+            setPadding(space, space, space, space)
+            setBackgroundColor(surface.background)
+            addView(AppChrome.text(this@KeyboardService,
+                "Meltype を起動できませんでした", 16f, strong = true))
+            addView(AppChrome.action(this@KeyboardService,
+                "別のキーボードに切り替える") {
+                try {
+                    (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                        .showInputMethodPicker()
+                } catch (error: RuntimeException) {
+                    Log.w(TAG, "Input method picker unavailable", error)
                     startActivity(Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 }
+            }, LinearLayout.LayoutParams(-1, AppChrome.dp(this@KeyboardService, 46)).apply {
+                topMargin = space
+            })
+            addView(AppChrome.action(this@KeyboardService,
+                "Android のキーボード設定", filled = false) {
+                startActivity(Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }, LinearLayout.LayoutParams(-1, AppChrome.dp(this@KeyboardService, 45)).apply {
+                topMargin = AppChrome.dp(this@KeyboardService, 8)
             })
         }
     }
@@ -576,14 +725,15 @@ class KeyboardService : InputMethodService(), KeyListener {
     private fun buildNormalKeyboardView(): View {
         val start = System.nanoTime()
         val bar = CandidateBarView(this).also { it.onInlinePick = { inlineAction?.invoke() }; it.onPick = { index ->
+            clipboardPillGate.edited()
+            personalKeys.clear()
             val instance = core
             if (instance != null && nav.current == LayoutId.ROMAJI) {
                 val choice = coreInput.choices.getOrNull(index)
                 if (choice != null) {
-                    // A prediction is committed by the click itself. A conversion
-                    // candidate is only selected, so a tap also presses Enter.
-                    coreSend(instance, ImeJson.candidateClicked(choice.nativeIndex, fieldFacts()))
-                    if (coreInput.composing) coreVirtualKey(0x0D)
+                    // Use Claude PR #14's clause-by-clause tap protocol without
+                    // changing personal completion or clipboard pill behavior.
+                    CandidateTap.tap(coreInput, choice.nativeIndex, { fieldFacts() }) { coreSend(instance, it) }
                 }
             } else render(session.handle(Operation.Pick(index)))
         } }
@@ -617,6 +767,18 @@ class KeyboardService : InputMethodService(), KeyListener {
             clipboardBarContainer = this
             addView(bar, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+            addView(TextView(this@KeyboardService).apply {
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                setPadding(dp(8), 0, dp(8), 0)
+                this.background = AppChrome.shape(this@KeyboardService, 0xFF3B3B3F.toInt(), 17)
+                visibility = View.GONE
+                isClickable = true
+                setOnClickListener { visibility = View.GONE }
+                keyboardNotice = this
+            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                dp(39), Gravity.CENTER))
             addView(TextView(this@KeyboardService).apply {
                 text = "▤"
                 contentDescription = "クリップボード履歴"
@@ -774,6 +936,9 @@ class KeyboardService : InputMethodService(), KeyListener {
         // Restarted in the same editor without finishing it: the editor kept the composing text.
         if (coreInput.composing) leaveCore(focusLeft = false)
         policy = fieldPolicy(info.inputType, info.imeOptions)
+        clipboardPillGate.opened(restarting)
+        personalKeys.clear()
+        personalInputStarted = false
         phoneLeaveRecordedForField = false
         suggestedPhonePart = phoneFields.next(info.packageName, SystemClock.elapsedRealtime(), restarting)
         clipboardButton?.visibility = if (policy.isPassword) View.GONE else View.VISIBLE
@@ -798,11 +963,21 @@ class KeyboardService : InputMethodService(), KeyListener {
         )
         screens.fieldStarted(policy.layout)
         displayCandidates(emptyList(), null)
+        // A default IME is permitted to read the current clipboard while visible.
+        // The listener alone misses clips copied before the keyboard service started.
+        if (!policy.isPassword && !fieldTraits.contains("Private")) {
+            runCatching { clipboardManager?.primaryClip }.getOrNull()?.let(::captureClipboard)
+        }
         updateLatestClipboardSuggestion()
+        startScreenshotObserver()
         applyCurrentInsets()
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        mainHandler.removeCallbacks(clipboardPillExpiry)
+        clipboardPillGate.closed()
+        personalKeys.clear()
+        personalInputStarted = false
         rememberPhoneField()
         keyboardView?.cancelTouch()
         languagePopup.dismiss()
@@ -814,6 +989,10 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onFinishInput() {
+        mainHandler.removeCallbacks(clipboardPillExpiry)
+        clipboardPillGate.closed()
+        personalKeys.clear()
+        personalInputStarted = false
         rememberPhoneField()
         keyboardView?.cancelTouch()
         emojiPanel?.cancelTouch()
@@ -839,13 +1018,29 @@ class KeyboardService : InputMethodService(), KeyListener {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         selStart = newSelStart
         selEnd = newSelEnd
+        // Number, telephone and forced English editors commit directly, rather
+        // than through Core. Their own caret callbacks must preserve raw keys.
+        val ownDirectInput = personalInputStarted && personalKeys.isOwnDirectInput(
+            currentInputConnection?.getTextBeforeCursor(96, 0),
+            selectionCollapsed = newSelStart == newSelEnd,
+        )
         if (bridge.onSelectionChanged(newSelStart, newSelEnd, candidatesStart, candidatesEnd)) {
+            personalKeys.clear()
+            personalInputStarted = false
             // 利用者がカーソルを動かした、またはアプリが文章を書き換えた。出ている文字はそのまま確定させる。
             dropComposition()
             currentInputConnection?.finishComposingText()
         }
         // Core の書き換えでないキャレットの移動は、Core に知らせる（変換中なら、出ている文字のまま確定させる）。
-        if (!caretWatch.isOwn(newSelStart, newSelEnd, candidatesEnd, coreInput.composing)) caretMovedOutside()
+        if (!caretWatch.isOwn(newSelStart, newSelEnd, candidatesEnd, coreInput.composing)) {
+            if (!ownDirectInput) {
+                personalKeys.clear()
+                personalInputStarted = false
+            }
+            // The Core still needs notification of an edit outside its own
+            // composition, even if the personal-completion keys remain valid.
+            caretMovedOutside()
+        }
         refreshInlineSuggestion()
     }
 
@@ -868,9 +1063,44 @@ class KeyboardService : InputMethodService(), KeyListener {
         val start = System.nanoTime()
         connection?.beginBatchEdit()
         try {
+            when (action) {
+                is KeyAction.Romaji -> {
+                    personalInputStarted = true
+                    personalKeys.typed(action.char.toString(), selStart)
+                }
+                is KeyAction.Text -> {
+                    personalInputStarted = true
+                    personalKeys.typed(action.text, selStart)
+                }
+                is KeyAction.Flick -> {
+                    personalInputStarted = true
+                    // The kana input path does not produce roman key events.
+                    personalKeys.clear()
+                }
+                KeyAction.Delete -> personalKeys.deleted()
+                KeyAction.Shift -> Unit
+                else -> {
+                    personalKeys.clear()
+                    personalInputStarted = false
+                }
+            }
+            // Typing, Enter, conversion, and emoji selection all dismiss a
+            // clipboard chip. Only an actual final deletion can restore it.
+            if (action != KeyAction.Delete && action != KeyAction.Shift)
+                clipboardPillGate.edited()
             handleKey(action, direction, timeMs)
         } finally {
             connection?.endBatchEdit()
+        }
+        if (action == KeyAction.Delete) {
+            // Some editors report edits asynchronously, so recheck after callbacks.
+            if (editorIsCompletelyEmpty()) clipboardPillGate.deleted(true)
+            else mainHandler.post {
+                if (editorIsCompletelyEmpty()) {
+                    clipboardPillGate.deleted(true)
+                    refreshInlineSuggestion()
+                }
+            }
         }
         refreshInlineSuggestion()
         if (PerfLog.enabled) {
@@ -1048,18 +1278,28 @@ class KeyboardService : InputMethodService(), KeyListener {
         }
     }
 
+    private fun rememberSuccessfulClipboardPaste(clip: HistoryClip) {
+        val token = clipboardPillGate.pasted(clip.id, clip.createdAt)
+        getSharedPreferences("clipboard_pill", android.content.Context.MODE_PRIVATE)
+            .edit().putString("consumed_copy", token).apply()
+        mainHandler.removeCallbacks(clipboardPillExpiry)
+        refreshInlineSuggestion()
+    }
+
     private fun pasteClipboardItem(clip: HistoryClip) {
         if (policy.isPassword) return
         commitComposing()
         if (!clip.isMedia) {
-            currentInputConnection?.commitText(clip.text, 1)
-            closeClipboardPanel()
+            if (currentInputConnection?.commitText(clip.text, 1) == true) {
+                rememberSuccessfulClipboardPaste(clip)
+                closeClipboardPanel()
+            } else showKeyboardNotice("貼り付けできませんでした")
             return
         }
         val supported = currentInputEditorInfo?.contentMimeTypes.orEmpty()
             .any { ClipDescription.compareMimeTypes(clip.mime, it) }
         if (!supported) {
-            Toast.makeText(this, "この入力欄は画像やファイルの直接貼り付けに対応していません", Toast.LENGTH_SHORT).show()
+            showKeyboardNotice("この入力欄は画像を貼り付けられません")
             return
         }
         val content = InputContentInfo(
@@ -1069,8 +1309,10 @@ class KeyboardService : InputMethodService(), KeyListener {
         val done = currentInputConnection?.commitContent(
             content, InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null
         ) == true
-        if (done) closeClipboardPanel()
-        else Toast.makeText(this, "貼り付けできませんでした", Toast.LENGTH_SHORT).show()
+        if (done) {
+            rememberSuccessfulClipboardPaste(clip)
+            closeClipboardPanel()
+        } else showKeyboardNotice("貼り付けできませんでした")
     }
 
     private fun clipboardAction(clip: HistoryClip, action: String) {
@@ -1097,7 +1339,7 @@ class KeyboardService : InputMethodService(), KeyListener {
                     }
                     mainHandler.post {
                         clipboardManager?.setPrimaryClip(ClipData.newPlainText("Meltype", normalized))
-                        Toast.makeText(this, "パラメータを除去してコピーしました", Toast.LENGTH_SHORT).show()
+                        showKeyboardNotice("パラメータを除去してコピーしました")
                         refreshClipboardPanel()
                     }
                 }
@@ -1125,13 +1367,13 @@ class KeyboardService : InputMethodService(), KeyListener {
         if (clipboardWorker.isShutdown) return
         val text = result.getOrNull()
         if (text == null) {
-            Toast.makeText(this, "処理できませんでした（言語・画像・モデルを確認）", Toast.LENGTH_SHORT).show()
+            showKeyboardNotice("処理できませんでした（言語・画像・モデルを確認）")
             return
         }
         clipboardWorker.execute {
             clipboardStore.saveText(text)
             mainHandler.post {
-                Toast.makeText(this, "結果をクリップボード履歴に保存しました", Toast.LENGTH_SHORT).show()
+                showKeyboardNotice("結果をクリップボード履歴に保存しました")
                 refreshClipboardPanel()
             }
         }

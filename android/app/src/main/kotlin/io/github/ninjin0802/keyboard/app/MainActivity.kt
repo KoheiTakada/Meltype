@@ -2,7 +2,8 @@
 package io.github.ninjin0802.keyboard.app
 
 import android.app.Activity
-import android.app.AlertDialog
+import android.Manifest
+import android.content.pm.PackageManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.res.Configuration
@@ -22,13 +23,16 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.SeekBar
-import android.widget.Switch
 import android.widget.TextView
+import android.widget.EditText
+import android.text.InputType
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardRetention
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
+import io.github.ninjin0802.keyboard.app.clipboard.RecentScreenshotSource
 import io.github.ninjin0802.keyboard.app.layout.LayoutId
-import io.github.ninjin0802.keyboard.app.essentials.DictionaryActivity
+import io.github.ninjin0802.keyboard.app.essentials.DictionaryAdapter
+import io.github.ninjin0802.keyboard.app.essentials.PersonalCompleter
+import io.github.ninjin0802.keyboard.app.essentials.UserWord
 import java.util.Locale
 
 /**
@@ -39,15 +43,28 @@ class MainActivity : Activity() {
     private val settings by lazy { Settings(this) }
     private val density by lazy { resources.displayMetrics.density }
     private fun dp(n: Int) = (n * density + .5f).toInt()
-    private enum class Page { HOME, LANGUAGES, GENERAL, CORRECTION, EMOJI }
+    private enum class Page { HOME, LANGUAGES, GENERAL, CORRECTION, EMOJI, DICTIONARY, PERSONAL, WORD_EDIT, PERSONAL_EDIT, CHOICE }
     private var page = Page.HOME
+    private val userWords by lazy { DictionaryAdapter(this) }
+    private var editingWord: UserWord? = null
+    private var personalKind: String = "email"
+    private var returnChoicePage = Page.GENERAL
+    private var choiceTitle = ""
+    private var choiceSelected = -1
+    private var choiceOptions = emptyList<Pair<String, () -> Unit>>()
 
     // Android 13+ gesture Back dispatches through this callback. Earlier
     // Android versions still call the onBackPressed() compatibility override.
     private var systemBackCallback: OnBackInvokedCallback? = null
 
     private fun navigateBack() {
-        if (page == Page.HOME) finish() else navigate(Page.HOME)
+        when (page) {
+            Page.HOME -> finish()
+            Page.WORD_EDIT -> navigate(Page.DICTIONARY)
+            Page.PERSONAL_EDIT -> navigate(Page.PERSONAL)
+            Page.CHOICE -> navigate(returnChoicePage)
+            else -> navigate(Page.HOME)
+        }
     }
 
     /**
@@ -82,7 +99,11 @@ class MainActivity : Activity() {
             @Suppress("DEPRECATION")
             val legacyBottom = insets?.systemWindowInsetBottom ?: 0
             val top = maxOf(reportedTop, legacyTop, platformBarHeight("status_bar_height"))
-            val bottom = maxOf(reportedBottom, legacyBottom, platformBarHeight("navigation_bar_height"))
+            val imeBottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets?.getInsets(WindowInsets.Type.ime())?.bottom ?: 0
+            } else 0
+            val bottom = maxOf(reportedBottom, legacyBottom, imeBottom,
+                platformBarHeight("navigation_bar_height"))
             if (root.paddingTop != top || root.paddingBottom != bottom) {
                 root.setPadding(0, top, 0, bottom)
             }
@@ -120,6 +141,10 @@ class MainActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         page = state?.getString("page")?.let { runCatching { Page.valueOf(it) }.getOrNull() } ?: Page.HOME
+        // Editors and option lists contain transient callbacks, never resurrect an empty form.
+        if (page == Page.WORD_EDIT) page = Page.DICTIONARY
+        if (page == Page.PERSONAL_EDIT) page = Page.PERSONAL
+        if (page == Page.CHOICE) page = Page.GENERAL
         // Let our root own *all* bar insets. Android 15+ is edge-to-edge
         // regardless of target window flags; explicitly match that behavior
         // on Android 11-14 so our layout receives unconsumed status insets.
@@ -153,6 +178,41 @@ class MainActivity : Activity() {
             systemBackCallback = null
         }
         super.onDestroy()
+    }
+
+    /** Screenshot access is opt-in and requested only from this dedicated settings row. */
+    private fun configureScreenshotSuggestions() {
+        val source = RecentScreenshotSource(this)
+        if (source.enabled()) {
+            source.setEnabled(false)
+            render()
+            return
+        }
+        if (source.hasFullImageAccess()) {
+            source.setEnabled(true)
+            render()
+            return
+        }
+        val permissions = when {
+            Build.VERSION.SDK_INT >= 34 -> arrayOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+            Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+            else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        requestPermissions(permissions, SCREENSHOT_ACCESS_REQUEST)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int,
+        permissions: Array<out String>, grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != SCREENSHOT_ACCESS_REQUEST) return
+        val source = RecentScreenshotSource(this)
+        // Do not infer permission from only the first requested grant: Android 14
+        // users can allow selected photos rather than future screenshots.
+        source.setEnabled(source.hasFullImageAccess())
+        render()
     }
 
     override fun onSaveInstanceState(state: Bundle) {
@@ -228,13 +288,15 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
         if (checked != null) {
-            val toggle = Switch(this@MainActivity).apply {
-                isChecked = checked
+            val toggle = AppToggle(this@MainActivity).apply {
                 contentDescription = title
-                setOnCheckedChangeListener { _, value -> onToggle?.invoke(value) }
+                setChecked(checked)
+                this.onToggle = { onToggle?.invoke(it) }
             }
-            row.addView(toggle, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(12) })
-            row.setOnClickListener { toggle.isChecked = !toggle.isChecked }
+            row.addView(toggle, LinearLayout.LayoutParams(dp(52), dp(40)).apply {
+                marginStart = dp(12)
+            })
+            row.setOnClickListener { toggle.performClick() }
             row.isFocusable = true
         } else if (action != null) {
             row.addView(text("›", 26f, muted = true).apply { gravity = Gravity.CENTER },
@@ -273,13 +335,27 @@ class MainActivity : Activity() {
             })
     }
 
+    /** Settings options are a navigable Meltype page, never an OS modal. */
     private fun choose(title: String, selected: Int, values: List<Pair<String, () -> Unit>>) {
-        AlertDialog.Builder(this).setTitle(title)
-            .setSingleChoiceItems(values.map { it.first }.toTypedArray(), selected) { dialog, index ->
-                values[index].second()
-                dialog.dismiss()
-                render()
-            }.setNegativeButton(android.R.string.cancel, null).show()
+        choiceTitle = title
+        choiceSelected = selected
+        choiceOptions = values
+        returnChoicePage = page
+        navigate(Page.CHOICE)
+    }
+
+    private fun choice(content: LinearLayout) {
+        title(content, choiceTitle)
+        card(content) {
+            choiceOptions.forEachIndexed { index, option ->
+                if (index > 0) divider()
+                entry(option.first, if (index == choiceSelected) "選択中" else null,
+                    if (index == choiceSelected) "✓" else null, selected = index == choiceSelected) {
+                    option.second()
+                    navigate(returnChoicePage)
+                }
+            }
+        }
     }
 
     /** Remains accessible from the launcher even when the IME process crashes. */
@@ -362,6 +438,11 @@ class MainActivity : Activity() {
             Page.GENERAL -> general(content)
             Page.CORRECTION -> correction(content)
             Page.EMOJI -> emoji(content)
+            Page.DICTIONARY -> dictionaryPage(content)
+            Page.PERSONAL -> personalPage(content)
+            Page.WORD_EDIT -> wordEditor(content)
+            Page.PERSONAL_EDIT -> personalEditor(content)
+            Page.CHOICE -> choice(content)
         }
         return ScrollView(this).apply {
             isFillViewport = true
@@ -402,9 +483,11 @@ class MainActivity : Activity() {
             entry("設定", "スペース・振動・キー操作", "☷", selected = selected == Page.GENERAL) { navigate(Page.GENERAL) }
         }
         card(content) {
-            entry("ユーザー辞書", "読み・単語・個人情報の補完", "▤") {
-                startActivity(Intent(this@MainActivity, DictionaryActivity::class.java))
-            }
+            entry("ユーザー辞書", "読みから単語を変換", "▤",
+                selected = selected == Page.DICTIONARY) { navigate(Page.DICTIONARY) }
+            divider()
+            entry("個人情報", "メールアドレス・電話番号・住所", "◉",
+                selected = selected == Page.PERSONAL) { navigate(Page.PERSONAL) }
             divider()
             entry("修正と候補", "ライブ変換・入力候補", "✓", selected = selected == Page.CORRECTION) { navigate(Page.CORRECTION) }
             divider()
@@ -417,6 +500,177 @@ class MainActivity : Activity() {
                 startActivity(Intent(this@MainActivity, LicensesActivity::class.java))
             }
         }
+    }
+
+    /** Ordinary words and sensitive personal completions share Core's userdict.txt only. */
+    private fun dictionaryPage(content: LinearLayout) {
+        title(content, "ユーザー辞書")
+        hint(content, "読みを入力すると、登録した単語を変換候補に表示します。")
+        card(content) {
+            entry("＋ 単語を登録", "読み・単語を設定", "＋") {
+                editingWord = null
+                navigate(Page.WORD_EDIT)
+            }
+        }
+        val list = userWords.list().filter { PersonalCompleter.kindOf(it.word) == null }
+        card(content, "登録した単語") {
+            if (list.isEmpty()) {
+                addView(text("登録した単語はありません", 14f, muted = true).apply {
+                    setPadding(dp(18), dp(18), dp(18), dp(18))
+                })
+            }
+            list.forEachIndexed { index, word ->
+                if (index > 0) divider()
+                entry(word.word, word.reading, "▤") {
+                    editingWord = word
+                    navigate(Page.WORD_EDIT)
+                }
+            }
+        }
+    }
+
+    private fun personalPage(content: LinearLayout) {
+        title(content, "個人情報")
+        hint(content, "メール・電話・住所の補完に使用します。保存先はユーザー辞書と共通で、端末内のみです。")
+        val all = userWords.list()
+        for ((kind, heading, prompt) in listOf(
+            Triple("email", "メールアドレス", "メールアドレスを登録"),
+            Triple("phone", "電話番号", "電話番号を登録"),
+            Triple("address", "住所", "住所を登録")
+        )) {
+            card(content, heading) {
+                entry("＋ " + prompt, "タップして登録", "＋") {
+                    personalKind = kind
+                    editingWord = null
+                    navigate(Page.PERSONAL_EDIT)
+                }
+                val items = all.filter { PersonalCompleter.kindOf(it.word) == kind }
+                items.forEach { word ->
+                    divider()
+                    entry(word.word, if (kind == "phone") "3-4-4分割にも対応" else null, "◉") {
+                        personalKind = kind
+                        editingWord = word
+                        navigate(Page.PERSONAL_EDIT)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun formError(context: LinearLayout): TextView =
+        AppChrome.text(this, "", 13f).apply {
+            setTextColor(AppChrome.colors(this@MainActivity).danger)
+            visibility = View.GONE
+            context.addView(this, LinearLayout.LayoutParams(-1, -2).apply {
+                topMargin = dp(10)
+            })
+        }
+
+    private fun wordEditor(content: LinearLayout) {
+        title(content, if (editingWord == null) "単語を登録" else "単語を編集")
+        val original = editingWord
+        val reading = AppChrome.input(this, "読み（例：めるたいぷ）", original?.reading.orEmpty())
+        val word = AppChrome.input(this, "単語（例：Meltype）", original?.word.orEmpty())
+        card(content, "読みと単語") {
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+            addView(text("読み", 13f, muted = true))
+            addView(reading, LinearLayout.LayoutParams(-1, dp(54)).apply {
+                topMargin = dp(8)
+                bottomMargin = dp(15)
+            })
+            addView(text("単語", 13f, muted = true))
+            addView(word, LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(8) })
+        }
+        val error = formError(content)
+        content.addView(AppChrome.action(this, "保存") {
+            val r = reading.text.toString()
+            val w = word.text.toString()
+            val saved = if (PersonalCompleter.kindOf(w) != null) false else
+                if (original == null) userWords.add(r, w) else userWords.edit(original, r, w)
+            if (saved) navigate(Page.DICTIONARY)
+            else {
+                error.text = if (PersonalCompleter.kindOf(w) != null)
+                    "メール・電話・住所は「個人情報」から登録してください。"
+                else "読みと単語を確認してください。"
+                error.visibility = View.VISIBLE
+            }
+        }, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) })
+        editFooter(content, original, Page.DICTIONARY)
+    }
+
+    private fun personalEditor(content: LinearLayout) {
+        val original = editingWord
+        val (name, placeholder, reading) = when (personalKind) {
+            "phone" -> Triple("電話番号", "09012345678", "でんわ")
+            "address" -> Triple("住所", "東京都千代田区千代田1-1", "じゅうしょ")
+            else -> Triple("メールアドレス", "your.name@example.com", "めあど")
+        }
+        title(content, if (original == null) name + "を登録" else name + "を編集")
+        val value = AppChrome.input(this, placeholder, original?.word.orEmpty()).apply {
+            inputType = when (personalKind) {
+                "phone" -> InputType.TYPE_CLASS_PHONE
+                "email" -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+                else -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS
+            }
+        }
+        val townReading = if (personalKind == "address") {
+            AppChrome.input(this, "例：ちよだ",
+                original?.reading?.takeUnless { it == "じゅうしょ" ||
+                    it == PersonalCompleter.prefectureReading(original.word) }.orEmpty())
+        } else null
+        card(content, name) {
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+            addView(text("登録内容", 13f, muted = true))
+            addView(value, LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(8) })
+            if (townReading != null) {
+                addView(text("町名の読み（任意）", 13f, muted = true), LinearLayout.LayoutParams(-1, -2).apply {
+                    topMargin = dp(16)
+                })
+                addView(townReading, LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(8) })
+            }
+        }
+        hint(content, when (personalKind) {
+            "email" -> "入力途中で補完します。候補は @ から先が小さい2行目になります。"
+            "phone" -> "フルサイズの1行候補。3-4-4に分かれた入力欄では続きを提示します。"
+            else -> "都道府県名は自動で読みを補完します。町名からも入力したい場合は、町名の読みを登録してください。候補は2行表示です。"
+        })
+        val error = formError(content)
+        content.addView(AppChrome.action(this, "保存") {
+            val word = value.text.toString().trim()
+            val valid = PersonalCompleter.kindOf(word) == personalKind
+            val savedReading = if (personalKind == "address") {
+                townReading?.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: PersonalCompleter.prefectureReading(word) ?: reading
+            } else original?.reading ?: reading
+            val ok = valid && if (original == null) userWords.add(savedReading, word)
+                else userWords.edit(original, savedReading, word)
+            if (ok) navigate(Page.PERSONAL)
+            else {
+                error.text = "形式を確認してください。"
+                error.visibility = View.VISIBLE
+            }
+        }, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) })
+        editFooter(content, original, Page.PERSONAL)
+    }
+
+    /** Inline deletion with a second tap instead of an OS confirmation modal. */
+    private fun editFooter(content: LinearLayout, original: UserWord?, destination: Page) {
+        if (original != null) {
+            val delete = AppChrome.action(this, "削除", filled = false, destructive = true) {}
+            var confirm = false
+            delete.setOnClickListener {
+                if (!confirm) {
+                    confirm = true
+                    delete.text = "もう一度タップして削除"
+                } else if (userWords.delete(original)) navigate(destination)
+            }
+            content.addView(delete, LinearLayout.LayoutParams(-1, dp(48)).apply {
+                topMargin = dp(9)
+            })
+        }
+        content.addView(AppChrome.action(this, "キャンセル", filled = false) {
+            navigate(destination)
+        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(9) })
     }
 
     private fun languages(content: LinearLayout) {
@@ -462,6 +716,12 @@ class MainActivity : Activity() {
             }
         }
         card(content, "クリップボード") {
+            val source = RecentScreenshotSource(this@MainActivity)
+            entry("最近のスクリーンショット",
+                if (source.enabled()) "画像候補を表示する（許可済み）"
+                else "写真へのアクセスを許可すると画像チップを表示できる",
+                symbol = "▧") { configureScreenshotSuggestions() }
+            divider()
             val days = ClipboardRetention.days(this@MainActivity)
             entry("履歴の保存期間", days.toString() + "日") {
                 val options = ClipboardRetention.OPTIONS
@@ -480,26 +740,10 @@ class MainActivity : Activity() {
     }
 
     private fun timing() {
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(8), dp(18), dp(4))
-        }
-        val value = text(waitText(settings.toggleWaitMs), 17f)
-        content.addView(value)
-        content.addView(SeekBar(this).apply {
-            max = WAIT_STEPS - 1
-            progress = progressOf(settings.toggleWaitMs)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seek: SeekBar, n: Int, fromUser: Boolean) {
-                    value.text = waitText(waitOfProgress(n))
-                    if (fromUser) settings.toggleWaitMs = waitOfProgress(n)
-                }
-                override fun onStartTrackingTouch(seek: SeekBar) = Unit
-                override fun onStopTrackingTouch(seek: SeekBar) = Unit
+        choose("トグル判定時間", progressOf(settings.toggleWaitMs),
+            (0 until WAIT_STEPS).map { index ->
+                waitText(waitOfProgress(index)) to { settings.toggleWaitMs = waitOfProgress(index) }
             })
-        })
-        AlertDialog.Builder(this).setTitle("トグル判定時間")
-            .setView(content).setPositiveButton(android.R.string.ok) { _, _ -> render() }.show()
     }
 
     private fun correction(content: LinearLayout) {
@@ -522,6 +766,7 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        private const val SCREENSHOT_ACCESS_REQUEST = 7214
         private const val WAIT_STEPS = 18
         private const val WAIT_BASE_MS = 300
         private const val WAIT_STEP_MS = 100

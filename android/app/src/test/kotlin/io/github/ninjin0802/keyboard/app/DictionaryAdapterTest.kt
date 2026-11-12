@@ -19,12 +19,25 @@ class DictionaryAdapterTest {
         assertEquals("kohei@example.com", PersonalCompleter.suggest("kohei",list)?.replacement)
         assertEquals("09012345678", PersonalCompleter.suggest("090",list)?.replacement)
         assertNull(PersonalCompleter.suggest("09",list))
+        assertNull(PersonalCompleter.suggest("めあど",list))
+        assertEquals("kohei@example.com", PersonalCompleter.suggest("kohe",list)?.replacement)
     }
-    @Test fun addressFromTown() {
+    @Test fun addressMatchesTypedKeysNotVisibleKanji() {
         val list = listOf(UserWord("じゅうしょ","東京都千代田区千代田1-1"))
-        assertEquals("千代田1-1", PersonalCompleter.suggest("千代田",list)?.replacement)
-        assertEquals("東京都千代田区千代田1-1", PersonalCompleter.suggest("東京都",list)?.replacement)
+        assertEquals("東京都千代田区千代田1-1", PersonalCompleter.suggest("tou",list)?.replacement)
+        assertEquals("東京都千代田区千代田1-1", PersonalCompleter.suggest("toukyou",list)?.replacement)
+        assertEquals("東京都千代田区千代田1-1", PersonalCompleter.suggest("とうきょう",list)?.replacement)
+        assertNull(PersonalCompleter.suggest("東京都",list))
+        assertNull(PersonalCompleter.suggest("じゅうしょ",list))
     }
+    @Test fun townReadingCompletesFromTypedKanaOrRomajiWithoutKanjiMatching() {
+        val entries = listOf(UserWord("ちよだ", "東京都千代田区千代田1-1"))
+        assertEquals("千代田1-1", PersonalCompleter.suggest("chiyo", entries)?.replacement)
+        assertEquals("千代田1-1", PersonalCompleter.suggest("ちよだ", entries)?.replacement)
+        assertEquals("東京都千代田区千代田1-1",
+            PersonalCompleter.suggest("toukyou", entries)?.replacement)
+    }
+
     @Test fun ordinaryDictionaryIsNativeOnly() {
         assertNull(PersonalCompleter.suggest("めるたいぷ",listOf(UserWord("めるたいぷ","Meltype"))))
     }

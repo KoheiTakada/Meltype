@@ -9,8 +9,15 @@ import android.view.KeyEvent
 import android.view.WindowInsets
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Switch
+import io.github.ninjin0802.keyboard.app.AppToggle
 import android.widget.TextView
+import android.widget.LinearLayout
+import android.graphics.drawable.GradientDrawable
+import android.text.Spanned
+import android.text.style.RelativeSizeSpan
+import io.github.ninjin0802.keyboard.app.view.CandidateBarView
+import io.github.ninjin0802.keyboard.app.view.BarSuggestion
+import io.github.ninjin0802.keyboard.app.view.SuggestionKind
 import io.github.ninjin0802.keyboard.app.core.CoreConfig
 import io.github.ninjin0802.keyboard.app.core.coreDataDirectory
 import androidx.test.platform.app.InstrumentationRegistry
@@ -42,8 +49,8 @@ class SettingsScreenDeviceTest {
         return null
     }
 
-    private fun allSwitches(view: View): List<Switch> {
-        if (view is Switch) return listOf(view)
+    private fun allSwitches(view: View): List<AppToggle> {
+        if (view is AppToggle) return listOf(view)
         if (view !is ViewGroup) return emptyList()
         return (0 until view.childCount).flatMap { allSwitches(view.getChildAt(it)) }
     }
@@ -104,12 +111,12 @@ class SettingsScreenDeviceTest {
                 assertNotNull(findText(activity.window.decorView, "ライブ変換"))
                 val toggles = allSwitches(activity.window.decorView)
                 assertEquals(1, toggles.size)
-                assertEquals(previous, toggles[0].isChecked)
-                toggles[0].isChecked = !previous
+                assertEquals(previous, toggles[0].isChecked())
+                toggles[0].setChecked(!previous)
                 assertEquals(!previous, Settings(activity).liveConversionEnabled)
                 // Kept where the Core reads it (config.json), not in the keyboard's own preferences.
                 assertEquals(!previous, CoreConfig(coreDataDirectory(activity)).boolean(CoreConfig.LIVE_CONVERSION))
-                toggles[0].isChecked = previous
+                toggles[0].setChecked(previous)
                 assertEquals(previous, settings.liveConversionEnabled)
             }
         } finally {
@@ -188,6 +195,67 @@ class SettingsScreenDeviceTest {
             }
         } finally {
             instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
+    @Test fun dictionaryAndPersonalInformationAreSeparateNonModalEditors() {
+        val activity = open()
+        try {
+            instrumentation.runOnMainSync {
+                val personal = findText(activity.window.decorView, "個人情報")
+                assertNotNull("Personal information has its own settings category", personal)
+                val row = (personal!!.parent as View).parent as View
+                row.performClick()
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                val root = activity.window.decorView
+                assertNotNull(findText(root, "メールアドレス"))
+                assertNotNull(findText(root, "電話番号"))
+                assertNotNull(findText(root, "住所"))
+                val addEmail = findText(root, "＋ メールアドレスを登録")
+                assertNotNull(addEmail)
+                ((addEmail!!.parent as View).parent as View).performClick()
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                val root = activity.window.decorView
+                assertNotNull("The editor must be in the content pane",
+                    findText(root, "登録内容"))
+                assertNotNull(findText(root, "保存"))
+                assertNotNull(findText(root, "キャンセル"))
+                // No Android AlertDialog / modal is used for personal information.
+                val pane = activity.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
+                assertTrue("Editor must remain in the activity root", pane.isAttachedToWindow)
+            }
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
+    @Test fun emailAndClipboardHaveDistinctGboardLikeCandidateSurfaces() {
+        instrumentation.runOnMainSync {
+            val bar = CandidateBarView(instrumentation.targetContext)
+            bar.show(emptyList(), null, BarSuggestion("sample.user@example.com", SuggestionKind.EMAIL))
+            val row = bar.getChildAt(0) as LinearLayout
+            val email = row.getChildAt(0) as TextView
+            assertEquals("sample.user\n@example.com", email.text.toString())
+            val text = email.text as Spanned
+            val spans = text.getSpans(0, text.length, RelativeSizeSpan::class.java)
+            assertTrue("The domain must use a smaller font", spans.any { it.sizeChange < 1f })
+            bar.show(emptyList(), null, BarSuggestion("Copied text", SuggestionKind.CLIPBOARD_TEXT))
+            val pill = row.getChildAt(0)
+            assertTrue("Clipboard should be a container, not a plain candidate cell",
+                pill is LinearLayout)
+            assertTrue("Clipboard chip is an explicitly rounded custom surface",
+                pill.background is GradientDrawable)
+            assertEquals("クリップボードを貼り付ける: Copied text",
+                pill.contentDescription.toString())
+            bar.show(emptyList(), null, BarSuggestion("Screenshot", SuggestionKind.CLIPBOARD_IMAGE))
+            val imagePill = row.getChildAt(0) as LinearLayout
+            assertNotNull(findText(imagePill, "Screenshot"))
+            bar.show(emptyList(), null, BarSuggestion("09012345678", SuggestionKind.PHONE))
+            assertEquals("09012345678", (row.getChildAt(0) as TextView).text.toString())
         }
     }
 

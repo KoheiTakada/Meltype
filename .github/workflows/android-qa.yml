@@ -3,7 +3,7 @@
 name: Android QA — reproducible device tests
 on:
   push:
-    branches: [feat/android-bilingual-adaptive-ime, feature/android-keyboard-essentials, personal/android-development]
+    branches: [feat/android-bilingual-adaptive-ime, feature/android-keyboard-essentials, feature/android-personal-info-settings, personal/android-development]
     paths:
       - 'android/**'
       - 'src/Meltype.Core/**'
@@ -100,7 +100,9 @@ jobs:
             echo '## Android test results unavailable' >> "$GITHUB_STEP_SUMMARY"
             echo 'A prerequisite failed before the emulator suite. Inspect the job log and JVM XML.' >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: Upload test code reproducibility evidence and APK
+      # Retain the debug APK for manual device repro even when QA fails.
+      # This artifact is NOT a production release; CI still reports failure.
+      - name: Upload QA report and debug APK for manual reproduction
         if: always()
         uses: actions/upload-artifact@v4
         with:
