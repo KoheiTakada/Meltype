@@ -129,10 +129,16 @@ object PersonalCompleter {
                 else -> emptyList()
             }
             for (target in targets) {
-                val test = if (latin && kind == "address")
-                    romanize(target.reading) else target.reading.lowercase()
-                if (before.length < (if (kind == "phone") 3 else if (latin) 3 else 2) ||
-                    !test.startsWith(before)) continue
+                val test = when {
+                    kind == "phone" -> digits(target.reading)
+                    latin && kind == "address" -> romanize(target.reading)
+                    else -> target.reading.lowercase()
+                }
+                // Telephone fields often input unformatted digits even if the
+                // stored phone number contains dashes or spaces.
+                val prefix = if (kind == "phone") digits(before) else before
+                if (prefix.length < (if (kind == "phone") 3 else if (latin) 3 else 2) ||
+                    !test.startsWith(prefix)) continue
                 val score = before.length * 10 + if (test.length > before.length) 1 else 0
                 if (score > bestScore) {
                     bestScore = score
