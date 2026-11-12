@@ -92,18 +92,27 @@ object PersonalCompleter {
         return out.toString()
     }
 
-    /** Registered native reading when it represents the address, not an unrelated shortcut like "じゅうしょ". */
-    private fun addressReadings(entry: UserWord): List<String> {
-        val prefecture = prefectureReadings.entries.firstOrNull { entry.word.startsWith(it.key) }
-            ?: return emptyList()
+    /** The prefecture reading is derived from the stored word, never guessed from kanji OCR. */
+    fun prefectureReading(word: String): String? =
+        prefectureReadings.entries.firstOrNull { word.startsWith(it.key) }?.value
+
+    private data class Target(val reading: String, val text: String)
+
+    /** Native dictionary reading can be used for an optional town phonetic alias. */
+    private fun addressTargets(entry: UserWord): List<Target> {
+        val prefecture = prefectureReading(entry.word) ?: return emptyList()
+        val targets = mutableListOf(Target(prefecture, entry.word))
         val stored = hiragana(entry.reading)
-        return listOfNotNull(
-            prefecture.value,
-            stored.takeIf { it.startsWith(prefecture.value) && it.length > prefecture.value.length },
-        )
+        if (stored.length >= 2 && stored != "じゅうしょ" &&
+            stored.all { it in 'ぁ'..'ん' || it == 'ー' }) {
+            val suffix = if (stored.startsWith(prefecture)) entry.word
+                else addressSuffixes(entry.word).lastOrNull() ?: entry.word
+            targets += Target(stored, suffix)
+        }
+        return targets
     }
 
-    /** Match the phonetic keys or kana BEFORE conversion; never ask whether the visible kanji is equal. */
+    /** Match what the user actually typed. Conversion display is not used for lookups. */
     fun suggest(typed: String, dictionary: List<UserWord>): PersonalCompletion? {
         if (typed.isBlank()) return null
         val before = hiragana(typed).lowercase()
@@ -112,19 +121,20 @@ object PersonalCompleter {
         var bestScore = -1
         for (entry in dictionary) {
             val kind = kindOf(entry.word) ?: continue
-            val candidates = when (kind) {
-                "address" -> addressReadings(entry)
-                "email", "phone" -> listOf(entry.word)
+            val targets = when (kind) {
+                "address" -> addressTargets(entry)
+                "email", "phone" -> listOf(Target(entry.word, entry.word))
                 else -> emptyList()
             }
-            for (reading in candidates) {
-                val test = if (latin && kind == "address") romanize(reading) else reading.lowercase()
+            for (target in targets) {
+                val test = if (latin && kind == "address")
+                    romanize(target.reading) else target.reading.lowercase()
                 if (before.length < (if (kind == "phone") 3 else if (latin) 3 else 2) ||
                     !test.startsWith(before)) continue
                 val score = before.length * 10 + if (test.length > before.length) 1 else 0
                 if (score > bestScore) {
                     bestScore = score
-                    best = PersonalCompletion(entry.word, typed, entry.word, kind)
+                    best = PersonalCompletion(target.text, typed, target.text, kind)
                 }
             }
         }
