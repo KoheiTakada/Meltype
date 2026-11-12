@@ -19,11 +19,16 @@ class DictionaryAdapterTest {
         assertEquals("kohei@example.com", PersonalCompleter.suggest("kohei",list)?.replacement)
         assertEquals("09012345678", PersonalCompleter.suggest("090",list)?.replacement)
         assertNull(PersonalCompleter.suggest("09",list))
+        assertNull(PersonalCompleter.suggest("めあど",list))
+        assertEquals("kohei@example.com", PersonalCompleter.suggest("kohe",list)?.replacement)
     }
-    @Test fun addressFromTown() {
+    @Test fun addressMatchesTypedKeysNotVisibleKanji() {
         val list = listOf(UserWord("じゅうしょ","埼玉県さいたま市架空町1-2-3"))
-        assertEquals("架空町1-2-3", PersonalCompleter.suggest("架空町",list)?.replacement)
-        assertEquals("埼玉県さいたま市架空町1-2-3", PersonalCompleter.suggest("埼玉県",list)?.replacement)
+        assertEquals("埼玉県さいたま市架空町1-2-3", PersonalCompleter.suggest("sai",list)?.replacement)
+        assertEquals("埼玉県さいたま市架空町1-2-3", PersonalCompleter.suggest("saitama",list)?.replacement)
+        assertEquals("埼玉県さいたま市架空町1-2-3", PersonalCompleter.suggest("さいたま",list)?.replacement)
+        assertNull(PersonalCompleter.suggest("埼玉県",list))
+        assertNull(PersonalCompleter.suggest("じゅうしょ",list))
     }
     @Test fun ordinaryDictionaryIsNativeOnly() {
         assertNull(PersonalCompleter.suggest("めるたいぷ",listOf(UserWord("めるたいぷ","Meltype"))))
