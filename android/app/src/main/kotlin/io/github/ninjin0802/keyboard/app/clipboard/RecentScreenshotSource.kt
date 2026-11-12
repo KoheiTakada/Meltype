@@ -11,7 +11,7 @@ import android.provider.MediaStore
 
 /** Opt-in, locally queried screenshots. No photo scan before explicit user consent. */
 class RecentScreenshotSource(private val context: Context) {
-    data class Screenshot(val id: Long, val uri: Uri)
+    data class Screenshot(val id: Long, val uri: Uri, val capturedAtMs: Long)
     private val prefs = context.getSharedPreferences("screenshot_suggestions", Context.MODE_PRIVATE)
 
     fun enabled(): Boolean = prefs.getBoolean("enabled", false) && hasFullImageAccess()
@@ -59,7 +59,7 @@ class RecentScreenshotSource(private val context: Context) {
                     if (added in (now - maxAgeMs)..now && looksLikeScreenshot(name, folder)) {
                         val id = cursor.getLong(idIndex)
                         return@use Screenshot(id, android.content.ContentUris.withAppendedId(
-                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id))
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id), added)
                     }
                 }
                 null
