@@ -284,6 +284,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     private var baseSelected: Int? = null
     private var inlineAction: (() -> Unit)? = null
     private val personalKeys = PersonalTypingBuffer()
+    private var personalInputStarted = false
     private var keyboardNotice: TextView? = null
     private val dismissNotice = Runnable { keyboardNotice?.visibility = View.GONE }
 
@@ -315,7 +316,7 @@ class KeyboardService : InputMethodService(), KeyListener {
             else currentInputConnection?.getTextBeforeCursor(160, 0)?.toString()
         // Core can live-convert the visible text to kanji. The raw keys remain
         // the matching source; editor text is only the fallback for kana flick input.
-        val typed = personalKeys.current().ifEmpty { before.orEmpty() }
+        val typed = if (personalInputStarted) personalKeys.current().ifEmpty { before.orEmpty() } else ""
         val entry: PersonalCompletion? = if (before.isNullOrEmpty() || typed.isBlank()) null
             else PersonalCompleter.suggest(typed, dictionary.list())
         val inline: BarSuggestion? = when {
@@ -899,6 +900,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         if (coreInput.composing) leaveCore(focusLeft = false)
         policy = fieldPolicy(info.inputType, info.imeOptions)
         personalKeys.clear()
+        personalInputStarted = false
         phoneLeaveRecordedForField = false
         suggestedPhonePart = phoneFields.next(info.packageName, SystemClock.elapsedRealtime(), restarting)
         clipboardButton?.visibility = if (policy.isPassword) View.GONE else View.VISIBLE
@@ -935,6 +937,7 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         personalKeys.clear()
+        personalInputStarted = false
         rememberPhoneField()
         keyboardView?.cancelTouch()
         languagePopup.dismiss()
@@ -947,6 +950,7 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     override fun onFinishInput() {
         personalKeys.clear()
+        personalInputStarted = false
         rememberPhoneField()
         keyboardView?.cancelTouch()
         emojiPanel?.cancelTouch()
@@ -974,6 +978,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         selEnd = newSelEnd
         if (bridge.onSelectionChanged(newSelStart, newSelEnd, candidatesStart, candidatesEnd)) {
             personalKeys.clear()
+            personalInputStarted = false
             // 利用者がカーソルを動かした、またはアプリが文章を書き換えた。出ている文字はそのまま確定させる。
             dropComposition()
             currentInputConnection?.finishComposingText()
@@ -981,6 +986,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         // Core の書き換えでないキャレットの移動は、Core に知らせる（変換中なら、出ている文字のまま確定させる）。
         if (!caretWatch.isOwn(newSelStart, newSelEnd, candidatesEnd, coreInput.composing)) {
             personalKeys.clear()
+            personalInputStarted = false
             caretMovedOutside()
         }
         refreshInlineSuggestion()
@@ -1006,11 +1012,25 @@ class KeyboardService : InputMethodService(), KeyListener {
         connection?.beginBatchEdit()
         try {
             when (action) {
-                is KeyAction.Romaji -> personalKeys.typed(action.char.toString(), selStart)
-                is KeyAction.Text -> personalKeys.typed(action.text, selStart)
+                is KeyAction.Romaji -> {
+                    personalInputStarted = true
+                    personalKeys.typed(action.char.toString(), selStart)
+                }
+                is KeyAction.Text -> {
+                    personalInputStarted = true
+                    personalKeys.typed(action.text, selStart)
+                }
+                is KeyAction.Flick -> {
+                    personalInputStarted = true
+                    // The kana input path does not produce roman key events.
+                    personalKeys.clear()
+                }
                 KeyAction.Delete -> personalKeys.deleted()
                 KeyAction.Shift -> Unit
-                else -> personalKeys.clear()
+                else -> {
+                    personalKeys.clear()
+                    personalInputStarted = false
+                }
             }
             handleKey(action, direction, timeMs)
         } finally {
