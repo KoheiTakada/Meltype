@@ -8,6 +8,30 @@ package io.github.ninjin0802.keyboard.app.clipboard
  */
 internal class ClipboardPillGate {
     private var eligible = false
+    private var consumedCopyToken: String? = null
+
+    /** Store only an opaque database ID and copy time, never clipboard content. */
+    fun restoreConsumedCopyToken(token: String?) {
+        consumedCopyToken = token
+    }
+
+    fun canOffer(copyId: Long, copiedAtMs: Long, nowMs: Long): Boolean =
+        eligible && copiedAtMs > 0L && nowMs >= copiedAtMs &&
+            nowMs - copiedAtMs < MAX_OFFER_AGE_MS &&
+            consumedCopyToken != copyToken(copyId, copiedAtMs)
+
+    /** Called only after the input connection confirms a successful paste. */
+    fun pasted(copyId: Long, copiedAtMs: Long): String {
+        val token = copyToken(copyId, copiedAtMs)
+        consumedCopyToken = token
+        eligible = false
+        return token
+    }
+
+    companion object {
+        const val MAX_OFFER_AGE_MS = 5L * 60_000L
+        private fun copyToken(id: Long, timestamp: Long): String = "$id:$timestamp"
+    }
 
     fun opened(restarting: Boolean) {
         if (!restarting) eligible = true
