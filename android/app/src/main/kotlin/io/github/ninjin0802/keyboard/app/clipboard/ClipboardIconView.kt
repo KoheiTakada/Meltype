@@ -62,6 +62,15 @@ class ClipboardIconView(
                 rect(11f, 7f, 22f, 16f, 4f)
                 line(9f, 12f, 15f, 12f)
             }
+            // Clipboard-history control: conventional board, clip and ruled paper,
+            // matching Gboard's recognisable clipboard silhouette rather than a glyph.
+            "clipboard" -> {
+                rect(5f, 6f, 19f, 21f, 2f)
+                rect(9f, 3f, 15f, 8f, 1.3f)
+                line(9f, 12f, 15f, 12f)
+                line(9f, 15.5f, 15f, 15.5f)
+                line(9f, 19f, 14f, 19f)
+            }
             "copy" -> { rect(7f, 7f, 20f, 21f); poly(4f, 17f, 4f, 3f, 16f, 3f) }
             "edit" -> {
                 poly(4f, 20f, 8f, 19f, 20f, 7f, 17f, 4f, 5f, 16f, 4f, 20f)
