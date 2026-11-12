@@ -602,7 +602,7 @@ class MainActivity : Activity() {
         val original = editingWord
         val (name, placeholder, reading) = when (personalKind) {
             "phone" -> Triple("電話番号", "09012345678", "でんわ")
-            "address" -> Triple("住所", "埼玉県朝霞市西弁財2-6-34-101", "じゅうしょ")
+            "address" -> Triple("住所", "埼玉県さいたま市架空町1-2-3", "じゅうしょ")
             else -> Triple("メールアドレス", "your.name@example.com", "めあど")
         }
         title(content, if (original == null) name + "を登録" else name + "を編集")
