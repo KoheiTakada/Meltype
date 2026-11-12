@@ -97,7 +97,7 @@ class ImeLaunchDeviceTest {
         val keys = service?.activeKeysForSmokeTest()
         return activity.hasWindowFocus() && editor.hasFocus() &&
             imm.isActive(editor) && service?.isInputViewShown == true &&
-            keys?.layout?.id == expectedLayout &&
+            keys != null && keys.layout.id == expectedLayout &&
             keys.isAttachedToWindow && keys.isShown && keys.width > 100 && keys.height > 100
     }
 
