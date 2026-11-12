@@ -1011,6 +1011,12 @@ class KeyboardService : InputMethodService(), KeyListener {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         selStart = newSelStart
         selEnd = newSelEnd
+        // Number, telephone and forced English editors commit directly, rather
+        // than through Core. Their own caret callbacks must preserve raw keys.
+        val ownDirectInput = personalInputStarted && personalKeys.isOwnDirectInput(
+            currentInputConnection?.getTextBeforeCursor(96, 0),
+            selectionCollapsed = newSelStart == newSelEnd,
+        )
         if (bridge.onSelectionChanged(newSelStart, newSelEnd, candidatesStart, candidatesEnd)) {
             personalKeys.clear()
             personalInputStarted = false
@@ -1020,8 +1026,12 @@ class KeyboardService : InputMethodService(), KeyListener {
         }
         // Core の書き換えでないキャレットの移動は、Core に知らせる（変換中なら、出ている文字のまま確定させる）。
         if (!caretWatch.isOwn(newSelStart, newSelEnd, candidatesEnd, coreInput.composing)) {
-            personalKeys.clear()
-            personalInputStarted = false
+            if (!ownDirectInput) {
+                personalKeys.clear()
+                personalInputStarted = false
+            }
+            // The Core still needs notification of an edit outside its own
+            // composition, even if the personal-completion keys remain valid.
             caretMovedOutside()
         }
         refreshInlineSuggestion()
