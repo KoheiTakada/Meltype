@@ -34,6 +34,18 @@ class PersonalTypingBufferTest {
         assertNull(PersonalCompleter.suggest(keys.current(), entries))
     }
 
+    @Test fun typedRegionLengthTracksKanjiAlreadyCommittedByCore() {
+        val keys = PersonalTypingBuffer()
+        keys.typed("s", 5)
+        "aitamaken".forEach { keys.typed(it.toString(), 5) }
+        // Core wrote live-converted two-character prefix plus trailing kana.
+        assertEquals(4, keys.replacedUtf16Length(9))
+        assertNull(keys.replacedUtf16Length(5))
+        assertNull(keys.replacedUtf16Length(201))
+        keys.clear()
+        assertNull(keys.replacedUtf16Length(9))
+    }
+
     @Test fun uppercaseIsNormalizedAndFieldSwitchClearsIt() {
         val keys = PersonalTypingBuffer()
         keys.typed("KoHEi")
