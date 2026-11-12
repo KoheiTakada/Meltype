@@ -54,6 +54,28 @@ class PersonalTypingBufferTest {
         assertEquals("", keys.current())
     }
 
+    @Test fun forcedLatinAndNumericEditorCaretUpdatesPreserveTypedSuggestions() {
+        val email = PersonalTypingBuffer()
+        "kohei".forEach { email.typed(it.toString(), 0) }
+        assertEquals(true, email.isOwnDirectInput("kohei", selectionCollapsed = true))
+        assertEquals(true, email.isOwnDirectInput("prefix kohei", selectionCollapsed = true))
+        assertEquals(false, email.isOwnDirectInput("kohe", selectionCollapsed = true))
+        assertEquals(false, email.isOwnDirectInput("kohei", selectionCollapsed = false))
+
+        val phone = PersonalTypingBuffer()
+        "0901".forEach { phone.typed(it.toString(), 0) }
+        assertEquals(true, phone.isOwnDirectInput("0901", selectionCollapsed = true))
+        assertEquals(false, phone.isOwnDirectInput("0902", selectionCollapsed = true))
+        assertEquals(false, phone.isOwnDirectInput(null, selectionCollapsed = true))
+    }
+
+    @Test fun phoneNumberMatchesDigitsEvenWhenStoredWithSeparators() {
+        val entries = listOf(UserWord("でんわ", "090-1234-5678"))
+        assertEquals("090-1234-5678", PersonalCompleter.suggest("0901", entries)?.replacement)
+        assertEquals("090-1234-5678", PersonalCompleter.suggest("090", entries)?.replacement)
+        assertNull(PersonalCompleter.suggest("0909", entries))
+    }
+
     @Test fun distinguishKanaFromConvertedKanji() {
         val entries = listOf(UserWord("じゅうしょ", "東京都千代田区千代田1-1"))
         assertEquals("東京都千代田区千代田1-1",
