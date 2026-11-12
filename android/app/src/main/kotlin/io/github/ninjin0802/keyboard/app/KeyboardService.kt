@@ -97,6 +97,7 @@ import io.github.ninjin0802.keyboard.app.clipboard.ClipboardContentProvider
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardEditorActivity
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardLinkPreviewLoader
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
+import io.github.ninjin0802.keyboard.app.clipboard.ClipboardIconView
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardPanelView
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardPillGate
 import io.github.ninjin0802.keyboard.app.clipboard.RecentScreenshotSource
