@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# One-time maintenance: preserve unmerged work as tags, then retain three branches.
+name: One-time fork branch cleanup 2026-11-12
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/one-time-branch-prune-20261112.yml']
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  cleanup:
+    if: github.repository == 'KoheiTakada/Meltype' && contains(github.event.head_commit.message, '[prune-branches-20261112]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Verify exact branch snapshot, archive unfinished work, close stale PRs, delete only approved refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          echo 'Checking exact preapproved branch tips before any mutation'
+          cat > /tmp/obsolete-branches.txt <<'BRANCHES'
+          bot/sponsors 037099577315147b0e4462d469b4be6de4ba6516
+          claude/android-clause-step fc49582a1451b598fa83206479e109f9eadee0f4
+          claude/personal-ime-recovery ebc1eac0a5d61f7819313c2bb6df2cff3d168be4
+          claude/personal-imehost 8bb10caa4949b985a7a0b2f0cd0cbe5bf173bd95
+          claude/pr1149-final 51691d947b85be3b2c02332087231a1b85af1f61
+          claude/pr1149-ime-smoke-stability 8dfdebe40cf155305967f12d136f1b898c89e30f
+          claude/pr1149-imehost fc49582a1451b598fa83206479e109f9eadee0f4
+          claude/release-signing-key 34c1f32a0fef820e26234fab5f5147e310d8ea11
+          codex/mozc-personal-verify 0dd82037ba19b79c47227e31925adb035d7f23f1
+          codex/mozc-upstream-verify f57cbf124ede14e40eed4330cd8ab647510e752e
+          codex/pr1149-device-validation-20261105 7690564d58d9dcfef3022f143f26df7ef8fc6d9c
+          codex/pr1149-input-icon-20261107 176e5a7e645689abc5d728863452eef6bef00efd
+          codex/pr1149-merge-validation-20261105 0440fec1caebc213f1a9849a9aa08bd5e545e24b
+          codex/verify-signing-20261105 8de262757560a5c5c3bd8bf470b7f0a424b0a68e
+          exp/android-local-onnx-reranker dc252eb10ef9095e060246b6a1360ceb4bd92240
+          feat/android-clipboard-history-30d f22b82ca07eebc0b14798068c41cb1f03f42d15d
+          feature/android-keyboard-essentials 5da8e8067f38707f38d96c44d0fd0880b00e2523
+          feature/android-personal-info-settings edd063ab50d796bbe69285787db9c4103d885bd0
+          fix/android-ime-boot-recovery-smoke 818a0e5a371de4f7a5be15dabaf09d2a9b28a30d
+          fix/android-isolated-test-apk eca92484984df15d8eae7276e23f5c513c5c230c
+          fix/android-signed-apk-release-20261104 157bba7fcfba09f5301099ede14dfd070ed31635
+          integrate/claude-pr14-personal-20261112 624039b4d2b780773cb7f56b68800f30e4205598
+          release/android-personal-25fcb741 fe59efb53651269fffad3db6fba76f3abb1e0dcb
+          BRANCHES
+          cat > /tmp/archive-names.txt <<'ARCHIVE'
+          bot/sponsors
+          claude/pr1149-ime-smoke-stability
+          claude/release-signing-key
+          codex/mozc-personal-verify
+          codex/mozc-upstream-verify
+          codex/pr1149-device-validation-20261105
+          codex/pr1149-merge-validation-20261105
+          codex/verify-signing-20261105
+          exp/android-local-onnx-reranker
+          feat/android-clipboard-history-30d
+          fix/android-ime-boot-recovery-smoke
+          fix/android-isolated-test-apk
+          ARCHIVE
+          { printf '%s\n' main personal/android-development feat/android-bilingual-adaptive-ime; cut -d' ' -f1 /tmp/obsolete-branches.txt; } | sort > /tmp/expected.txt
+          gh api --paginate "repos/$repo/branches?per_page=100" --jq '.[].name' | sort > /tmp/current.txt
+          diff -u /tmp/expected.txt /tmp/current.txt || { echo '::error::Branch set changed; aborting all cleanup'; exit 1; }
+          test "$(gh api "repos/$repo" --jq '.default_branch')" = main
+          while read -r branch sha; do
+            now="$(gh api "repos/$repo/git/ref/heads/$branch" --jq '.object.sha')"
+            test "$now" = "$sha" || { echo "::error::Moved branch $branch; aborting cleanup"; exit 1; }
+          done < /tmp/obsolete-branches.txt
+          echo 'All 23 branch refs match the approved snapshot'
+          while read -r branch; do
+            sha="$(awk -v b="$branch" '$1 == b { print $2 }' /tmp/obsolete-branches.txt)"
+            ref="refs/tags/archive/branch-cleanup-20261112/$branch"
+            gh api --method POST "repos/$repo/git/refs" -f ref="$ref" -f sha="$sha" >/dev/null
+            echo "Archived $branch at $sha"
+          done < /tmp/archive-names.txt
+          echo 'Archival tags created; closing two obsolete draft PRs (do not modify upstream PR #1149)'
+          for pr in 4 6; do
+            state="$(gh api "repos/$repo/pulls/$pr" --jq '.state')"
+            if test "$state" = open; then
+              gh api --method PATCH "repos/$repo/pulls/$pr" -f state=closed >/dev/null
+              echo "Closed superseded fork PR #$pr"
+            fi
+          done
+          while read -r branch sha; do
+            now="$(gh api "repos/$repo/git/ref/heads/$branch" --jq '.object.sha')"
+            test "$now" = "$sha" || { echo "::error::Moved branch $branch during cleanup; stopped"; exit 1; }
+            gh api --method DELETE "repos/$repo/git/refs/heads/$branch"
+            echo "Deleted $branch"
+          done < /tmp/obsolete-branches.txt
+          gh api --paginate "repos/$repo/branches?per_page=100" --jq '.[].name' | sort > /tmp/remaining.txt
+          printf '%s\n' main personal/android-development feat/android-bilingual-adaptive-ime | sort > /tmp/keep.txt
+          diff -u /tmp/keep.txt /tmp/remaining.txt
+          echo '## Branch cleanup succeeded: only three requested branches remain' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Archived 12 unmerged/independently useful branch tips under archive/branch-cleanup-20261112/ tags.' >> "$GITHUB_STEP_SUMMARY"
