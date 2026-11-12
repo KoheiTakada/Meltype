@@ -293,6 +293,19 @@ class KeyboardView(context: Context) : View(context) {
         )
     }
 
+    /**
+     * Actual drawn key centre in display coordinates, for device-level touch QA.
+     * Using width / columns skips the side/top insets and can hit another row.
+     * Never used to synthesize production key events.
+     */
+    internal fun keyCenterOnScreenForSmokeTest(key: Key): Pair<Float, Float> {
+        val bounds = RectF()
+        keyRect(key, bounds)
+        val origin = IntArray(2)
+        getLocationOnScreen(origin)
+        return (origin[0] + bounds.centerX()) to (origin[1] + bounds.centerY())
+    }
+
     private fun keyAtPoint(x: Float, y: Float): Key? {
         val unitX = (x - outerSidePx) / cellW
         val unitY = (y - outerTopPx) / cellH
