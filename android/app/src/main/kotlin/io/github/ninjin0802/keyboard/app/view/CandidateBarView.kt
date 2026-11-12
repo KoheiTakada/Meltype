@@ -146,10 +146,14 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
         val item = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), 0, dp(14), 0)
+            // Inset the screenshot by 4dp on all sides. With a 34dp pill
+            // (R17) and 26dp thumbnail (R13), the two curves are concentric.
+            val hasThumbnail = suggestion.kind == SuggestionKind.CLIPBOARD_IMAGE &&
+                suggestion.thumbnail != null
+            setPadding(if (hasThumbnail) dp(4) else dp(12), 0, dp(14), 0)
             background = GradientDrawable().apply {
-                setColor(0xFF3B3B3F.toInt())
-                cornerRadius = dp(40).toFloat()
+                setColor(palette.key)
+                cornerRadius = dp(17).toFloat()
             }
             isClickable = true
             isFocusable = true
@@ -163,22 +167,22 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
                 setImageBitmap(suggestion.thumbnail)
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 background = GradientDrawable().apply {
-                    setColor(0xFF66666B.toInt())
-                    cornerRadius = dp(17).toFloat()
+                    setColor(palette.keyPressed)
+                    cornerRadius = dp(13).toFloat()
                 }
                 clipToOutline = true
-            }, LinearLayout.LayoutParams(dp(27), dp(27)).apply { marginEnd = dp(8) })
+            }, LinearLayout.LayoutParams(dp(26), dp(26)).apply { marginEnd = dp(8) })
         } else {
             item.addView(ClipboardIconView(context,
-                if (suggestion.kind == SuggestionKind.CLIPBOARD_IMAGE) "image" else "copy",
-                Color.WHITE),
+                if (suggestion.kind == SuggestionKind.CLIPBOARD_IMAGE) "image" else "clipboard",
+                palette.text),
                 LinearLayout.LayoutParams(dp(23), dp(23)).apply { marginEnd = dp(8) })
         }
         item.addView(TextView(context).apply {
             text = if (suggestion.kind == SuggestionKind.CLIPBOARD_IMAGE) "Screenshot"
                 else suggestion.text
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            setTextColor(Color.WHITE)
+            setTextColor(palette.text)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             isSingleLine = true
             ellipsize = TextUtils.TruncateAt.END
