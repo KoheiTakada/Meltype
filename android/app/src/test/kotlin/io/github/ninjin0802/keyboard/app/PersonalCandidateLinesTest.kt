@@ -13,14 +13,14 @@ class PersonalCandidateLinesTest {
             PersonalCandidateLines.split("kohei.t0312@gmail.com", SuggestionKind.EMAIL))
     }
     @Test fun addressBreaksBeforeTown() {
-        assertEquals("埼玉県さいたま市" to "架空町1-2-3",
-            PersonalCandidateLines.split("埼玉県さいたま市架空町1-2-3", SuggestionKind.ADDRESS))
-        assertEquals("神奈川県横浜市港北区" to "菊名3-1",
-            PersonalCandidateLines.split("神奈川県横浜市港北区菊名3-1", SuggestionKind.ADDRESS))
+        assertEquals("東京都千代田区" to "千代田1-1",
+            PersonalCandidateLines.split("東京都千代田区千代田1-1", SuggestionKind.ADDRESS))
+        assertEquals("大阪府大阪市中央区" to "大阪城1-1",
+            PersonalCandidateLines.split("大阪府大阪市中央区大阪城1-1", SuggestionKind.ADDRESS))
     }
     @Test fun townOnlyVariantSeparatesNumber() {
-        assertEquals("架空町" to "1-2-3",
-            PersonalCandidateLines.split("架空町1-2-3", SuggestionKind.ADDRESS))
+        assertEquals("千代田" to "1-2-3",
+            PersonalCandidateLines.split("千代田1-1", SuggestionKind.ADDRESS))
     }
     @Test fun phonesUseFullSizeAndSingleLine() {
         assertEquals("09012345678" to null,
