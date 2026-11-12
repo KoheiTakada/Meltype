@@ -33,7 +33,7 @@ class DictionaryAdapterTest {
     @Test fun townReadingCompletesFromTypedKanaOrRomajiWithoutKanjiMatching() {
         val entries = listOf(UserWord("ちよだ", "東京都千代田区千代田1-1"))
         assertEquals("千代田1-1", PersonalCompleter.suggest("chiyo", entries)?.replacement)
-        assertEquals("千代田1-1", PersonalCompleter.suggest("かくう", entries)?.replacement)
+        assertEquals("千代田1-1", PersonalCompleter.suggest("ちよだ", entries)?.replacement)
         assertEquals("東京都千代田区千代田1-1",
             PersonalCompleter.suggest("toukyou", entries)?.replacement)
     }
