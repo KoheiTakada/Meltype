@@ -21,9 +21,9 @@ class DictionaryAdapterTest {
         assertNull(PersonalCompleter.suggest("09",list))
     }
     @Test fun addressFromTown() {
-        val list = listOf(UserWord("じゅうしょ","埼玉県朝霞市西弁財2-6-34-101"))
-        assertEquals("西弁財2-6-34-101", PersonalCompleter.suggest("西弁財",list)?.replacement)
-        assertEquals("埼玉県朝霞市西弁財2-6-34-101", PersonalCompleter.suggest("埼玉県",list)?.replacement)
+        val list = listOf(UserWord("じゅうしょ","埼玉県さいたま市架空町1-2-3"))
+        assertEquals("架空町1-2-3", PersonalCompleter.suggest("架空町",list)?.replacement)
+        assertEquals("埼玉県さいたま市架空町1-2-3", PersonalCompleter.suggest("埼玉県",list)?.replacement)
     }
     @Test fun ordinaryDictionaryIsNativeOnly() {
         assertNull(PersonalCompleter.suggest("めるたいぷ",listOf(UserWord("めるたいぷ","Meltype"))))
