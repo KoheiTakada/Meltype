@@ -79,7 +79,7 @@ object PersonalCompleter {
             val one = romanMap[text[i].toString()]
             when {
                 text[i] == 'っ' && i + 1 < text.length -> {
-                    val next = kanaDigraphs[text.substring(i + 1, minOf(i + 3, text.length)))
+                    val next = kanaDigraphs[text.substring(i + 1, minOf(i + 3, text.length))]
                         ?: romanMap[text[i + 1].toString()].orEmpty()
                     if (next.isNotEmpty()) out.append(next[0])
                     i++
