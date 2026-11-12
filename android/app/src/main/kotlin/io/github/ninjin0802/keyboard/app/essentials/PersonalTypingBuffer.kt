@@ -35,6 +35,19 @@ class PersonalTypingBuffer {
     fun current(): String = value.toString()
 
     /**
+     * In direct number/telephone/email/Latin editors, the Android editor reports
+     * the caret movement after our commitText(). CaretWatch intentionally treats
+     * non-Core edits as external to the Core, but the same update must NOT clear
+     * these raw keystrokes used by the personal completion UI.
+     *
+     * Verify against the visible editor tail, not just the caret delta: genuine
+     * cursor moves or app rewrites that remove the typed prefix still invalidate it.
+     */
+    fun isOwnDirectInput(editorBefore: CharSequence?, selectionCollapsed: Boolean): Boolean =
+        selectionCollapsed && value.isNotEmpty() &&
+            editorBefore?.toString()?.endsWith(value.toString(), ignoreCase = true) == true
+
+    /**
      * Span written since the first key, including any text Core live-converted
      * and committed ahead of the still-composing segment. Never delete an
      * arbitrary large range or a range that precedes the original caret.
