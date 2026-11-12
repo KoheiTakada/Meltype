@@ -602,7 +602,7 @@ class MainActivity : Activity() {
         val original = editingWord
         val (name, placeholder, reading) = when (personalKind) {
             "phone" -> Triple("電話番号", "09012345678", "でんわ")
-            "address" -> Triple("住所", "埼玉県さいたま市架空町1-2-3", "じゅうしょ")
+            "address" -> Triple("住所", "東京都千代田区千代田1-1", "じゅうしょ")
             else -> Triple("メールアドレス", "your.name@example.com", "めあど")
         }
         title(content, if (original == null) name + "を登録" else name + "を編集")
@@ -614,7 +614,7 @@ class MainActivity : Activity() {
             }
         }
         val townReading = if (personalKind == "address") {
-            AppChrome.input(this, "例：かくうまち",
+            AppChrome.input(this, "例：ちよだ",
                 original?.reading?.takeUnless { it == "じゅうしょ" ||
                     it == PersonalCompleter.prefectureReading(original.word) }.orEmpty())
         } else null
