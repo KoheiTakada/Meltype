@@ -19,7 +19,7 @@ class PersonalCandidateLinesTest {
             PersonalCandidateLines.split("大阪府大阪市中央区大阪城1-1", SuggestionKind.ADDRESS))
     }
     @Test fun townOnlyVariantSeparatesNumber() {
-        assertEquals("千代田" to "1-2-3",
+        assertEquals("千代田" to "1-1",
             PersonalCandidateLines.split("千代田1-1", SuggestionKind.ADDRESS))
     }
     @Test fun phonesUseFullSizeAndSingleLine() {
