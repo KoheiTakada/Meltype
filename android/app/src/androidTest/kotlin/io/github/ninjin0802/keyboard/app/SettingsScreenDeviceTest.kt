@@ -4,6 +4,7 @@ package io.github.ninjin0802.keyboard.app
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Insets
+import android.graphics.Bitmap
 import android.os.Build
 import android.view.KeyEvent
 import android.view.WindowInsets
@@ -12,12 +13,14 @@ import android.view.ViewGroup
 import io.github.ninjin0802.keyboard.app.AppToggle
 import android.widget.TextView
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.graphics.drawable.GradientDrawable
 import android.text.Spanned
 import android.text.style.RelativeSizeSpan
 import io.github.ninjin0802.keyboard.app.view.CandidateBarView
 import io.github.ninjin0802.keyboard.app.view.BarSuggestion
 import io.github.ninjin0802.keyboard.app.view.SuggestionKind
+import io.github.ninjin0802.keyboard.app.view.Palette
 import io.github.ninjin0802.keyboard.app.core.CoreConfig
 import io.github.ninjin0802.keyboard.app.core.coreDataDirectory
 import androidx.test.platform.app.InstrumentationRegistry
@@ -30,6 +33,7 @@ import org.junit.Test
 /** On-device checks for the settings Activity, not only for persisted values. */
 class SettingsScreenDeviceTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    private fun activityDensity() = instrumentation.targetContext.resources.displayMetrics.density
 
     private fun open(): Activity {
         val context = instrumentation.targetContext
@@ -249,11 +253,39 @@ class SettingsScreenDeviceTest {
                 pill is LinearLayout)
             assertTrue("Clipboard chip is an explicitly rounded custom surface",
                 pill.background is GradientDrawable)
+            assertEquals("The paste chip must look like an existing white key",
+                Palette.of(instrumentation.targetContext).key,
+                (pill.background as GradientDrawable).color?.defaultColor)
+            assertEquals("Clipboard chip text must use the key foreground",
+                Palette.of(instrumentation.targetContext).text,
+                (pill as LinearLayout).getChildAt(1).let { (it as TextView).currentTextColor })
             assertEquals("クリップボードを貼り付ける: Copied text",
                 pill.contentDescription.toString())
-            bar.show(emptyList(), null, BarSuggestion("Screenshot", SuggestionKind.CLIPBOARD_IMAGE))
-            val imagePill = row.getChildAt(0) as LinearLayout
-            assertNotNull(findText(imagePill, "Screenshot"))
+
+            // The screenshot thumbnail must sit within a pill as concentric
+            // rounded corners: 34dp/R17 outside; 26dp/R13 inside; 4dp inset.
+            val thumb = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
+            try {
+                bar.show(emptyList(), null, BarSuggestion("Screenshot",
+                    SuggestionKind.CLIPBOARD_IMAGE, thumb))
+                val imagePill = row.getChildAt(0) as LinearLayout
+                assertNotNull(findText(imagePill, "Screenshot"))
+                val image = imagePill.getChildAt(0) as ImageView
+                val density = activityDensity()
+                fun dp(n: Int) = (n * density + 0.5f).toInt()
+                assertEquals(dp(4), imagePill.paddingLeft)
+                assertEquals(dp(34), imagePill.layoutParams.height)
+                assertEquals(dp(26), image.layoutParams.width)
+                assertEquals(dp(26), image.layoutParams.height)
+                assertEquals(dp(17).toFloat(),
+                    (imagePill.background as GradientDrawable).cornerRadius, 0.1f)
+                assertEquals(dp(13).toFloat(),
+                    (image.background as GradientDrawable).cornerRadius, 0.1f)
+                assertEquals(Palette.of(instrumentation.targetContext).key,
+                    (imagePill.background as GradientDrawable).color?.defaultColor)
+            } finally {
+                thumb.recycle()
+            }
             bar.show(emptyList(), null, BarSuggestion("09012345678", SuggestionKind.PHONE))
             assertEquals("09012345678", (row.getChildAt(0) as TextView).text.toString())
         }
