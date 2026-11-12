@@ -96,6 +96,7 @@ import io.github.ninjin0802.keyboard.app.clipboard.ClipboardEditorActivity
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardLinkPreviewLoader
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardPanelView
+import io.github.ninjin0802.keyboard.app.clipboard.ClipboardPillGate
 import io.github.ninjin0802.keyboard.app.clipboard.RecentScreenshotSource
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardProcessing
 import io.github.ninjin0802.keyboard.app.clipboard.HistoryClip
@@ -283,6 +284,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     private var baseCandidates: List<io.github.ninjin0802.keyboard.engine.Candidate> = emptyList()
     private var baseSelected: Int? = null
     private var inlineAction: (() -> Unit)? = null
+    private val clipboardPillGate = ClipboardPillGate()
     private val personalKeys = PersonalTypingBuffer()
     private var personalInputStarted = false
     private var keyboardNotice: TextView? = null
@@ -306,6 +308,13 @@ class KeyboardService : InputMethodService(), KeyListener {
         baseCandidates = candidates
         baseSelected = selected
         refreshInlineSuggestion()
+    }
+
+    private fun editorIsCompletelyEmpty(): Boolean {
+        val connection = currentInputConnection ?: return false
+        return connection.getTextBeforeCursor(1, 0)?.isEmpty() == true &&
+            connection.getTextAfterCursor(1, 0)?.isEmpty() == true &&
+            !coreInput.composing && !session.isComposing
     }
 
     private fun refreshInlineSuggestion() {
@@ -335,13 +344,12 @@ class KeyboardService : InputMethodService(), KeyListener {
                 inlineAction = { acceptPhonePart(part) }
                 BarSuggestion(part, SuggestionKind.PHONE_SEGMENT)
             }
-            // Clipboard is an idle-state action, not a conversion prediction:
-            // only when the entire field is empty (at opening or after clearing it).
-            before.isEmpty() &&
-                currentInputConnection?.getTextAfterCursor(1, 0)?.isEmpty() == true &&
-                selStart == selEnd &&
-                baseCandidates.isEmpty() && !coreInput.composing &&
-                !session.isComposing && lastClipboard != null &&
+            // Show only before the first input in this editor session, or after
+            // Delete has actually cleared it. A conversion commit must NOT re-arm.
+            clipboardPillGate.visible() &&
+                selStart == selEnd && baseCandidates.isEmpty() &&
+                !coreInput.composing && !session.isComposing &&
+                lastClipboard != null &&
                 System.currentTimeMillis() - lastClipboard!!.createdAt in 0..90_000 -> {
                 val clip = lastClipboard!!
                 val accepted = !clip.isMedia || currentInputEditorInfo?.contentMimeTypes.orEmpty()
@@ -361,6 +369,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     private fun acceptPersonalCompletion(suggestion: PersonalCompletion) {
+        clipboardPillGate.edited()
         val connection = currentInputConnection ?: return
         val selection = connection.getExtractedText(
             android.view.inputmethod.ExtractedTextRequest(), 0)
@@ -407,6 +416,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     private fun acceptPhonePart(part: String) {
+        clipboardPillGate.edited()
         if (currentInputConnection?.getTextBeforeCursor(1, 0)?.isNotEmpty() == true) return
         currentInputConnection?.commitText(part, 1)
         caretWatch.lose()
@@ -688,6 +698,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     private fun buildNormalKeyboardView(): View {
         val start = System.nanoTime()
         val bar = CandidateBarView(this).also { it.onInlinePick = { inlineAction?.invoke() }; it.onPick = { index ->
+            clipboardPillGate.edited()
             personalKeys.clear()
             val instance = core
             if (instance != null && nav.current == LayoutId.ROMAJI) {
@@ -899,6 +910,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         // Restarted in the same editor without finishing it: the editor kept the composing text.
         if (coreInput.composing) leaveCore(focusLeft = false)
         policy = fieldPolicy(info.inputType, info.imeOptions)
+        clipboardPillGate.opened(restarting)
         personalKeys.clear()
         personalInputStarted = false
         phoneLeaveRecordedForField = false
@@ -936,6 +948,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        clipboardPillGate.closed()
         personalKeys.clear()
         personalInputStarted = false
         rememberPhoneField()
@@ -949,6 +962,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onFinishInput() {
+        clipboardPillGate.closed()
         personalKeys.clear()
         personalInputStarted = false
         rememberPhoneField()
@@ -1032,9 +1046,23 @@ class KeyboardService : InputMethodService(), KeyListener {
                     personalInputStarted = false
                 }
             }
+            // Typing, Enter, conversion, and emoji selection all dismiss a
+            // clipboard chip. Only an actual final deletion can restore it.
+            if (action != KeyAction.Delete && action != KeyAction.Shift)
+                clipboardPillGate.edited()
             handleKey(action, direction, timeMs)
         } finally {
             connection?.endBatchEdit()
+        }
+        if (action == KeyAction.Delete) {
+            // Some editors report edits asynchronously, so recheck after callbacks.
+            if (editorIsCompletelyEmpty()) clipboardPillGate.deleted(true)
+            else mainHandler.post {
+                if (editorIsCompletelyEmpty()) {
+                    clipboardPillGate.deleted(true)
+                    refreshInlineSuggestion()
+                }
+            }
         }
         refreshInlineSuggestion()
         if (PerfLog.enabled) {
@@ -1214,6 +1242,7 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     private fun pasteClipboardItem(clip: HistoryClip) {
         if (policy.isPassword) return
+        clipboardPillGate.edited()
         commitComposing()
         if (!clip.isMedia) {
             currentInputConnection?.commitText(clip.text, 1)
