@@ -100,8 +100,22 @@ jobs:
             echo '## Android test results unavailable' >> "$GITHUB_STEP_SUMMARY"
             echo 'A prerequisite failed before the emulator suite. Inspect the job log and JVM XML.' >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: Upload test code reproducibility evidence and APK
-        if: always()
+      # On failed Android 15 tests, retain diagnostics only. Never publish an
+      # installable APK artifact from a known failing test run.
+      - name: Upload failed QA reports without APK
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-qa-failure-reports-only
+          path: |
+            android/build/qa/
+            android/engine/build/test-results/test/
+            android/app/build/test-results/testDebugUnitTest/
+            android/mozc/build/outputs/androidTest-results/connected/
+          retention-days: 30
+          if-no-files-found: warn
+      - name: Upload APK only after Android 15 QA succeeds
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: android-qa-report-and-debug-apk
@@ -113,7 +127,7 @@ jobs:
             android/app/build/outputs/apk/debug/app-debug.apk
             android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
           retention-days: 30
-          if-no-files-found: warn
+          if-no-files-found: error
 
   # A second Android platform verifies this same compiled APK, not a new build.
   ime-smoke-android-17:
