@@ -12,13 +12,13 @@ import kotlin.test.assertNull
 class PersonalTypingBufferTest {
     @Test fun liveKanjiConversionDoesNotChangeRawPrefix() {
         val keys = PersonalTypingBuffer()
-        "saitama".forEach { keys.typed(it.toString()) }
-        assertEquals("saitama", keys.current())
-        val entries = listOf(UserWord("じゅうしょ", "埼玉県さいたま市架空町1-2-3"))
-        assertEquals("埼玉県さいたま市架空町1-2-3",
+        "toukyou".forEach { keys.typed(it.toString()) }
+        assertEquals("toukyou", keys.current())
+        val entries = listOf(UserWord("じゅうしょ", "東京都千代田区千代田1-1"))
+        assertEquals("東京都千代田区千代田1-1",
             PersonalCompleter.suggest(keys.current(), entries)?.replacement)
         // A Core view that now shows kanji must not be used for matching.
-        assertNull(PersonalCompleter.suggest("埼玉県", entries))
+        assertNull(PersonalCompleter.suggest("東京都", entries))
     }
 
     @Test fun emailMatchesTypingAndDeleteChangesThePrefix() {
@@ -55,10 +55,10 @@ class PersonalTypingBufferTest {
     }
 
     @Test fun distinguishKanaFromConvertedKanji() {
-        val entries = listOf(UserWord("じゅうしょ", "埼玉県さいたま市架空町1-2-3"))
-        assertEquals("埼玉県さいたま市架空町1-2-3",
-            PersonalCompleter.suggest("さいたま", entries)?.replacement)
+        val entries = listOf(UserWord("じゅうしょ", "東京都千代田区千代田1-1"))
+        assertEquals("東京都千代田区千代田1-1",
+            PersonalCompleter.suggest("とうきょう", entries)?.replacement)
         assertNull(PersonalCompleter.suggest("じゅうしょ", entries))
-        assertNull(PersonalCompleter.suggest("埼玉県", entries))
+        assertNull(PersonalCompleter.suggest("東京都", entries))
     }
 }
