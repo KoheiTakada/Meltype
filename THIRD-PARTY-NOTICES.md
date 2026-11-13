@@ -3,6 +3,7 @@
 Meltype のソースコード (このリポジトリ) には、次のものを除いて他者の著作物は含まれていません。
 
 - かな配列 (月配列 U9・花配列・NICOLA・中指NICOLA・TRON 配列) の表 (`src/Meltype.Core/Input/KanaLayout.cs`): [benizara](https://github.com/k-ayaki/benizara) の配列定義ファイルから取りました。MIT License (Copyright (c) 2018 綾木健一郎)
+- Android 版のアイコン (`android/app/src/main/res/drawable/ms_*.xml`): Google の [Material Symbols](https://github.com/google/material-design-icons) の SVG を VectorDrawable に変えたものです。Apache License 2.0 (Copyright 2022 Google LLC)。Android 版の通知は `android/THIRD-PARTY-NOTICES.md` にあります
 
 ## 配布用パッケージに同梱しているもの
 

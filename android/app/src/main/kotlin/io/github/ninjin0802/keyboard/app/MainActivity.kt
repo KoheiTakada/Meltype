@@ -4,6 +4,7 @@ package io.github.ninjin0802.keyboard.app
 import android.app.Activity
 import android.content.ComponentName
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
@@ -16,6 +17,7 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ScrollView
@@ -144,6 +146,14 @@ class MainActivity : Activity() {
             if (strong) typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         }
 
+    /** A Material Symbols icon in the secondary text color. Decorative: the row says what it does. */
+    private fun icon(resource: Int) = ImageView(this).apply {
+        setImageResource(resource)
+        imageTintList = ColorStateList.valueOf(theme.secondary)
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+
     private fun LinearLayout.divider() {
         addView(View(this@MainActivity).apply { setBackgroundColor(theme.line) },
             LinearLayout.LayoutParams(-1, dp(1)).apply {
@@ -185,10 +195,8 @@ class MainActivity : Activity() {
                 row.addView(text(value, 15f, muted = true),
                     LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(12) })
             }
-            row.addView(text(if (value != null) "▾" else "›", 22f, muted = true).apply {
-                gravity = Gravity.CENTER
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(dp(24), -2).apply { marginStart = dp(4) })
+            row.addView(icon(if (value != null) R.drawable.ms_arrow_drop_down else R.drawable.ms_chevron_right),
+                LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginStart = dp(4) })
             row.setOnClickListener { action(it) }
             row.isFocusable = true
         }

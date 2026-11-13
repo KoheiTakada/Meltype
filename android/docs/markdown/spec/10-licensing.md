@@ -21,6 +21,7 @@ GPL-3.0-or-later。
 | [Meltype](https://github.com/yksr-melt/Meltype) のコードと辞書 | GPL-3.0。辞書はファイルごとの条件 | 段階3 | 元の著作権表示を残す。移植したファイルには、元のファイルと移植したことを明記する |
 | Unicode の絵文字の一覧 [`emoji-test.txt`](https://unicode.org/Public/18.0.0/emoji/emoji-test.txt)（Unicode Emoji 18.0。形を変えたものを `app/src/main/assets/emoji.txt` として入れる） | Unicode License v3 | 段階1 | 著作権表示と許諾の文を同梱する。版を上げるときは、`tools/make-emoji-asset.py` で作り直し、この行と `THIRD-PARTY-NOTICES.md` の版を直す |
 | Kotlin や Android の標準ライブラリ、Protocol Buffers | Apache-2.0、BSD-3-Clause など | 段階1 | ライセンス文を同梱する |
+| Google の [Material Symbols](https://github.com/google/material-design-icons)（使うアイコンだけを VectorDrawable に変えて `app/src/main/res/drawable/ms_*.xml` として入れる） | Apache-2.0 | 段階1 | 著作権表示とライセンス文を同梱する（`THIRD-PARTY-NOTICES.md`）。各ファイルの先頭に出所を書く |
 
 ## 表記の置き場所
 
