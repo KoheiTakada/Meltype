@@ -442,6 +442,36 @@ class ImeLaunchDeviceTest {
         }
     }
 
+    /** Focuses the email field and waits until the English QWERTY keyboard writes to it. */
+    private fun focusEmail(activity: ImeSmokeActivity) {
+        requestKeyboard(activity, activity.editor)
+        waitUntil("the email field owns the English QWERTY keyboard", millis = 45_000, retryEveryMillis = 2_000,
+            retry = { requestKeyboard(activity, activity.editor) }, describe = { describeImeState(activity) }) {
+            isImeReadyFor(activity, activity.editor, io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY)
+        }
+    }
+
+    /**
+     * A key typed while the editor is restarting the input (Chrome restarts it when a web form field
+     * gets focus) reaches the editor's old, closed connection. It must still be typed: a, not nothing.
+     */
+    @Test fun aKeyTypedWhileTheEditorRestartsTheInputIsNotLost() = withRomajiActivity { activity ->
+        val editor = activity.editor
+        focusEmail(activity)
+        clear(editor)
+        focusEmail(activity)
+        val keyboard = shownKeys()
+        val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        // Restart and type at once, before the restart reaches the keyboard.
+        instrumentation.runOnMainSync { imm.restartInput(editor) }
+        tap(keyboard, "a") { (it as? KeyAction.Text)?.text == "a" }
+        focusEmail(activity)
+        tap(shownKeys(), "s") { (it as? KeyAction.Text)?.text == "s" }
+        waitUntil("both keys are typed", describe = { "text=" + editor.text + " " + describeImeState(activity) }) {
+            editor.text.toString() == "as"
+        }
+    }
+
     @Test fun selectedKeyboardOpensAndTypesThroughOnscreenTouch() {
         val expectedIme = target.packageName + "/" + KeyboardService::class.java.name
         assertEquals("The actual keyboard must be the system-selected default",
