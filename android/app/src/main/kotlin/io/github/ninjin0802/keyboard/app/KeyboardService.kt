@@ -609,6 +609,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         selStart = info.initialSelStart
         selEnd = info.initialSelEnd
         caretWatch.reset(selStart, selEnd)
+        if (restarting) typeLostTextAgain(info) else unconfirmed = ""
         if (keepComposing) {
             showCompositionAgain()
         } else {
@@ -660,6 +661,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         selStart = newSelStart
         selEnd = newSelEnd
+        unconfirmed = ""
         if (bridge.onSelectionChanged(newSelStart, newSelEnd, candidatesStart, candidatesEnd)) {
             // 利用者がカーソルを動かした、またはアプリが文章を書き換えた。出ている文字はそのまま確定させる。
             dropComposition()
@@ -910,7 +912,33 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     /** 未確定文字を作らずに、そのまま入力する。 */
     private fun insert(text: String) {
+        if (unconfirmed.isEmpty()) unconfirmedFrom = if (selStart == selEnd) selStart else -1
+        unconfirmed += text
         bridge.apply(Update(commit = text))
+    }
+
+    /**
+     * Text typed by [insert] that the editor has not reported yet (no onUpdateSelection since), and
+     * where the caret was before it. An editor that restarts the input closes its connection at once,
+     * while the keyboard writes to that connection until the restart reaches it: such text is lost
+     * unless typed again (see [typeLostTextAgain]).
+     */
+    private var unconfirmed = ""
+    private var unconfirmedFrom = -1
+
+    /**
+     * The editor restarted the input. If the caret is still where it was before the last unreported
+     * text, and that text is not before it, the text went to the closed connection: type it again.
+     */
+    private fun typeLostTextAgain(info: EditorInfo) {
+        val text = unconfirmed
+        val from = unconfirmedFrom
+        unconfirmed = ""
+        if (text.isEmpty() || from < 0 || info.initialSelStart != from || info.initialSelEnd != from) return
+        val input = currentInputConnection ?: return
+        if (input.getTextBeforeCursor(text.length, 0)?.toString() == text) return
+        input.commitText(text, 1)
+        caretWatch.replaced(0, text.length)
     }
 
     private fun setShift(value: ShiftState) {
