@@ -238,6 +238,10 @@ class KeyboardService : InputMethodService(), KeyListener {
     /** The Core's last view (smoke test only). */
     internal fun coreViewForSmokeTest(): ImeView? = coreInput.view
 
+    /** How many times an editor started the keyboard, restarts included (smoke test only). */
+    @Volatile internal var inputStartsForSmokeTest = 0
+        private set
+
     /** The keys handled lately and the editor each went to (smoke test only). */
     @Volatile internal var smokeKeyLog: String = ""
         private set
@@ -559,6 +563,7 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     private fun startNormalInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        inputStartsForSmokeTest++
         // Also refresh this on every editor focus, not only layout changes.
         keyboardView?.hapticEnabled = Settings(this).hapticEnabled
         // 同じ入力欄のまま始め直されることがある（アプリが作り直されない画面の回転など）。そのとき入力欄には
