@@ -620,6 +620,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         clipboardWorker.execute { clipboardStore.prune() }
         Settings(this).let {
             nav.choose(it.japaneseLayout, it.englishLayout)
+            it.moveSpaceWidthToCore()
             it.registerChangeListener(settingsListener)
         }
         // 辞書を写すので時間がかかる。変換と同じスレッドの先頭で行うので、変換はこれが終わってから動く。
@@ -1121,31 +1122,30 @@ class KeyboardService : InputMethodService(), KeyListener {
                 ),
             )
             is KeyAction.Text -> {
-                val punctuation = action.text in setOf("。", "、", "！", "？", "!", "?")
                 val upper = nav.current == LayoutId.QWERTY
                 val typed = if (upper) shift.apply(action.text) else action.text
-                if (punctuation) {
-                    // Only punctuation or the explicit Return key can confirm.
+                // The keys 、 and 。 commit what is being typed and then type themselves.
+                val confirms = action.text in CONFIRMING_PUNCTUATION
+                val native = if (confirms) null else coreForRomaji()
+                if (native != null) {
+                    // Japanese QWERTY and its symbol pages: every other symbol and digit goes to the
+                    // Core as the character typed, as on the Mac. The Core decides what it becomes
+                    // (? and ! full-width after Japanese, as typed after English), not this keyboard.
+                    typed.forEach { ch ->
+                        // Only the character: the Core decides the key from it
+                        // (a virtual key made from '.' would be Delete).
+                        val consumed = coreCharacter(ch.code)
+                        if (!consumed) {
+                            // A deliberately direct key still reaches the
+                            // editor, without a preceding commit of Japanese.
+                            insertPassed(ch.toString())
+                        }
+                    }
+                } else if (confirms || action.text in SENTENCE_END) {
                     commitComposing()
                     insert(typed)
                 } else {
-                    // A center numpad digit or symbol page input is a composing
-                    // key, not a commitText() operation.
-                    val native = coreForRomaji()
-                    if (native != null) {
-                        typed.forEach { ch ->
-                            // Only the character: the Core decides the key from it
-                            // (a virtual key made from '.' would be Delete).
-                            val consumed = coreCharacter(ch.code)
-                            if (!consumed) {
-                                // A deliberately direct key still reaches the
-                                // editor, without a preceding commit of Japanese.
-                                insertPassed(ch.toString())
-                            }
-                        }
-                    } else {
-                        insert(typed)
-                    }
+                    insert(typed)
                 }
                 if (upper) setShift(shift.onCharTyped())
             }
@@ -1179,7 +1179,9 @@ class KeyboardService : InputMethodService(), KeyListener {
                 else -> bridge.deleteBeforeCursor()
             }
             KeyAction.Space -> {
-                if (coreInput.composing && coreForRomaji() != null) {
+                // Japanese QWERTY: the Core decides, also when nothing is being typed (its setting
+                // SpaceWidth: half-width by default, full-width when chosen), as on the Mac and Linux.
+                if (coreForRomaji() != null) {
                     if (!coreCharacter(' '.code)) insertPassed(" ")
                     return
                 }
@@ -1187,6 +1189,7 @@ class KeyboardService : InputMethodService(), KeyListener {
                 // 変換する欄では次の候補を選ぶ。変換しない欄では、持っている1文字を確定するだけ。
                 render(session.handle(Operation.Space))
                 if (!selecting) {
+                    // 12キーのかなも、Core と同じ設定（SpaceWidth）で幅を決める。
                     val full = nav.current.isJapanese && Settings(this).japaneseSpaceFullWidth
                     insert(if (full) "　" else " ")
                 }
@@ -1528,5 +1531,14 @@ class KeyboardService : InputMethodService(), KeyListener {
         @Volatile internal var activeForSmokeTest: WeakReference<KeyboardService>? = null
         private const val TAG = "KeyboardService"
         private const val CONTEXT_LENGTH = 20
+
+        /** Keys that commit what is being typed before they type themselves (the 、 and 。 keys). */
+        private val CONFIRMING_PUNCTUATION = setOf("。", "、")
+
+        /**
+         * Without the Core (12-key, fields that do not convert), ? and ! also commit first and are
+         * typed as on the key, as before.
+         */
+        private val SENTENCE_END = setOf("！", "？", "!", "?")
     }
 }

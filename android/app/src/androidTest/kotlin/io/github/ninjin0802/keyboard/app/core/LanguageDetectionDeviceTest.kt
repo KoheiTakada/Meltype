@@ -15,15 +15,43 @@ import org.junit.Test
  * A successful build alone is NOT a successful bilingual regression test.
  */
 class LanguageDetectionDeviceTest {
-    @Test fun freshSettingsDefaultToRomajiHalfWidthAndNoEmoji() {
+    /**
+     * Runs [block] with the keyboard's preferences [keys] and the Core's SpaceWidth (config.json)
+     * unset, as on a fresh install, and puts both back afterwards.
+     */
+    private fun withFreshSettings(keys: List<String>, block: (Context) -> Unit) {
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
         val prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        val keys = listOf("japanese_layout", "japanese_space_full_width", "emoji_enabled")
         val original = prefs.all.toMap()
+        val config = CoreConfig(coreDataDirectory(ctx))
+        val originalConfig = config.file.takeIf { it.exists() }?.readBytes()
         try {
             val clear = prefs.edit()
             keys.forEach(clear::remove)
             check(clear.commit())
+            if (originalConfig != null) {
+                val values = org.json.JSONObject(String(originalConfig, Charsets.UTF_8))
+                values.remove(CoreConfig.SPACE_WIDTH)
+                config.file.writeText(values.toString(2))
+            }
+            block(ctx)
+        } finally {
+            val restore = prefs.edit()
+            keys.forEach { key ->
+                when (val value = original[key]) {
+                    null -> restore.remove(key)
+                    is String -> restore.putString(key, value)
+                    is Boolean -> restore.putBoolean(key, value)
+                    else -> error("Unexpected setting type for $key")
+                }
+            }
+            check(restore.commit())
+            if (originalConfig != null) config.file.writeBytes(originalConfig) else config.file.delete()
+        }
+    }
+
+    @Test fun freshSettingsDefaultToRomajiHalfWidthAndNoEmoji() =
+        withFreshSettings(listOf("japanese_layout", "japanese_space_full_width", "emoji_enabled")) { ctx ->
             val settings = io.github.ninjin0802.keyboard.app.Settings(ctx)
             assertEquals(io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI, settings.japaneseLayout)
             assertEquals(false, settings.japaneseSpaceFullWidth)
@@ -36,19 +64,20 @@ class LanguageDetectionDeviceTest {
             assertEquals(io.github.ninjin0802.keyboard.app.layout.LayoutId.KANA, saved.japaneseLayout)
             assertEquals(true, saved.japaneseSpaceFullWidth)
             assertEquals(true, saved.emojiEnabled)
-        } finally {
-            val restore = prefs.edit()
-            keys.forEach { key ->
-                when (val value = original[key]) {
-                    null -> restore.remove(key)
-                    is String -> restore.putString(key, value)
-                    is Boolean -> restore.putBoolean(key, value)
-                    else -> error("Unexpected setting type for $key")
-                }
-            }
-            check(restore.commit())
+            // The space is the Core's setting, which the Core reads for Japanese QWERTY.
+            assertEquals(CoreConfig.SPACE_FULL_WIDTH, CoreConfig(coreDataDirectory(ctx)).string(CoreConfig.SPACE_WIDTH))
         }
-    }
+
+    /** A full-width space chosen in an earlier version moves to the Core's config.json when the keyboard starts. */
+    @Test fun earlierFullWidthSpaceMovesToTheCore() =
+        withFreshSettings(listOf("japanese_space_full_width")) { ctx ->
+            val prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            check(prefs.edit().putBoolean("japanese_space_full_width", true).commit())
+            io.github.ninjin0802.keyboard.app.Settings(ctx).moveSpaceWidthToCore()
+            assertEquals(CoreConfig.SPACE_FULL_WIDTH, CoreConfig(coreDataDirectory(ctx)).string(CoreConfig.SPACE_WIDTH))
+            assertTrue("The old preference is removed once moved", !prefs.contains("japanese_space_full_width"))
+            assertEquals(true, io.github.ninjin0802.keyboard.app.Settings(ctx).japaneseSpaceFullWidth)
+        }
 
     /**
      * Sends events to the native Core the way KeyboardService does and applies the
@@ -106,6 +135,22 @@ class LanguageDetectionDeviceTest {
 
     @Test fun mixedLanguagesWithoutManualToggle() {
         assertEquals("hello ありがとう", type("hello arigatou"))
+    }
+
+    /**
+     * Android sends a symbol as the character typed and the Core decides its width, as on the Mac
+     * (the expectations are the Core's own: FeedbackTests and QualityTests in Meltype.Core.Tests).
+     */
+    @Test fun symbolsAfterJapaneseAreFullWidth() {
+        assertEquals("それな！", type("sorena!"))
+        assertEquals("なんで？", type("nande?"))
+        assertEquals("？", type("?"))
+    }
+
+    /** The reverse: after English, and in an email address, the symbols stay as typed. */
+    @Test fun symbolsAfterEnglishStayAsTyped() {
+        assertEquals("let's go!", type("let's go!"))
+        assertEquals("taro@example.com", type("taro@example.com"))
     }
 
     /** A whole response as the Core writes it (ImeOutput), with only the view varying. */

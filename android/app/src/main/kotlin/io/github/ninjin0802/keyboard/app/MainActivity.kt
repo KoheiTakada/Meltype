@@ -3,9 +3,9 @@ package io.github.ninjin0802.keyboard.app
 
 import android.app.Activity
 import android.Manifest
-import android.content.pm.PackageManager
 import android.content.ComponentName
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
@@ -19,12 +19,13 @@ import android.view.WindowInsets
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import android.view.View
-import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.EditText
 import android.text.InputType
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardRetention
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardHistoryStore
@@ -36,22 +37,28 @@ import io.github.ninjin0802.keyboard.app.essentials.UserWord
 import java.util.Locale
 
 /**
- * Settings screens inspired by the Android keyboard settings information
- * architecture. Only pending setup steps are shown; no tutorial or demo editor.
+ * The settings: one page that scrolls from top to bottom, in sections with a heading each.
+ * A choice opens a drop-down menu at its row. Only the user dictionary and the personal
+ * information open pages of their own (their lists and editors).
+ * Only a pending setup step is shown (at the top); no tutorial or demo editor.
  */
 class MainActivity : Activity() {
     private val settings by lazy { Settings(this) }
     private val density by lazy { resources.displayMetrics.density }
     private fun dp(n: Int) = (n * density + .5f).toInt()
-    private enum class Page { HOME, LANGUAGES, GENERAL, CORRECTION, EMOJI, DICTIONARY, PERSONAL, WORD_EDIT, PERSONAL_EDIT, CHOICE }
+    private enum class Page { HOME, DICTIONARY, PERSONAL, WORD_EDIT, PERSONAL_EDIT }
     private var page = Page.HOME
     private val userWords by lazy { DictionaryAdapter(this) }
     private var editingWord: UserWord? = null
     private var personalKind: String = "email"
-    private var returnChoicePage = Page.GENERAL
-    private var choiceTitle = ""
-    private var choiceSelected = -1
-    private var choiceOptions = emptyList<Pair<String, () -> Unit>>()
+
+    /** The page being shown, to keep its scroll position when it is drawn again. */
+    private var scroller: ScrollView? = null
+    private var scrolledPage: Page? = null
+
+    /** The last drop-down menu opened (device tests choose an item in it). */
+    internal var openDropdownForTest: PopupMenu? = null
+        private set
 
     // Android 13+ gesture Back dispatches through this callback. Earlier
     // Android versions still call the onBackPressed() compatibility override.
@@ -62,7 +69,6 @@ class MainActivity : Activity() {
             Page.HOME -> finish()
             Page.WORD_EDIT -> navigate(Page.DICTIONARY)
             Page.PERSONAL_EDIT -> navigate(Page.PERSONAL)
-            Page.CHOICE -> navigate(returnChoicePage)
             else -> navigate(Page.HOME)
         }
     }
@@ -70,7 +76,6 @@ class MainActivity : Activity() {
     /**
      * Android 15+ enforces edge-to-edge. Keep all settings content below the
      * status bar / display cutout and above the system navigation bar.
-     * Apply insets to the top-level view only, including the split fold UI.
      */
     private fun protectSystemBars(root: View): View {
         // Some OEM edge-to-edge windows dispatch consumed (zero) insets to
@@ -141,10 +146,9 @@ class MainActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         page = state?.getString("page")?.let { runCatching { Page.valueOf(it) }.getOrNull() } ?: Page.HOME
-        // Editors and option lists contain transient callbacks, never resurrect an empty form.
+        // Editors contain transient state, never resurrect an empty form.
         if (page == Page.WORD_EDIT) page = Page.DICTIONARY
         if (page == Page.PERSONAL_EDIT) page = Page.PERSONAL
-        if (page == Page.CHOICE) page = Page.GENERAL
         // Let our root own *all* bar insets. Android 15+ is edge-to-edge
         // regardless of target window flags; explicitly match that behavior
         // on Android 11-14 so our layout receives unconsumed status insets.
@@ -257,6 +261,14 @@ class MainActivity : Activity() {
             if (strong) typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         }
 
+    /** A Material Symbols icon in the secondary text color. Decorative: the row says what it does. */
+    private fun icon(resource: Int) = ImageView(this).apply {
+        setImageResource(resource)
+        imageTintList = ColorStateList.valueOf(theme.secondary)
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+
     private fun LinearLayout.divider() {
         addView(View(this@MainActivity).apply { setBackgroundColor(theme.line) },
             LinearLayout.LayoutParams(-1, dp(1)).apply {
@@ -264,24 +276,21 @@ class MainActivity : Activity() {
             })
     }
 
+    /**
+     * One row. With [checked], a switch. With [value], the current choice and a drop-down mark:
+     * [action] gets the row to open the menu at. With only [action], a row that opens something.
+     */
     private fun LinearLayout.entry(
-        title: String, detail: String? = null, symbol: String? = null,
+        title: String, detail: String? = null,
         checked: Boolean? = null, onToggle: ((Boolean) -> Unit)? = null,
-        selected: Boolean = false, action: (() -> Unit)? = null
+        value: String? = null, action: ((View) -> Unit)? = null,
     ) {
         val row = LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(18), dp(10), dp(18), dp(10))
-            minimumHeight = dp(if (detail == null) 68 else 84)
-            if (selected) setBackgroundColor(
-                if (theme.background == 0xFF1D1D1F.toInt()) 0xFF25252A.toInt()
-                else 0xFFE8EDF6.toInt()
-            )
+            setPadding(dp(18), dp(10), dp(14), dp(10))
+            minimumHeight = dp(if (detail == null) 60 else 76)
         }
-        if (symbol != null) row.addView(text(symbol, 21f, muted = true).apply {
-            gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(dp(35), dp(40)).apply { marginEnd = dp(14) })
         val labels = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
         labels.addView(text(title, 16f, strong = true))
         if (detail != null) labels.addView(text(detail, 13f, muted = true),
@@ -299,14 +308,19 @@ class MainActivity : Activity() {
             row.setOnClickListener { toggle.performClick() }
             row.isFocusable = true
         } else if (action != null) {
-            row.addView(text("›", 26f, muted = true).apply { gravity = Gravity.CENTER },
-                LinearLayout.LayoutParams(dp(25), -2))
-            row.setOnClickListener { action() }
+            if (value != null) {
+                row.addView(text(value, 15f, muted = true),
+                    LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(12) })
+            }
+            row.addView(icon(if (value != null) R.drawable.ms_arrow_drop_down else R.drawable.ms_chevron_right),
+                LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginStart = dp(4) })
+            row.setOnClickListener { action(it) }
             row.isFocusable = true
         }
         addView(row)
     }
 
+    /** A section: its heading, then its rows on one card. */
     private fun card(container: LinearLayout, heading: String? = null, items: LinearLayout.() -> Unit) {
         if (heading != null) container.addView(text(heading, 13f, strong = true),
             LinearLayout.LayoutParams(-1, -2).apply {
@@ -318,7 +332,7 @@ class MainActivity : Activity() {
             clipToOutline = true
             items()
         }
-        container.addView(group, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(17) })
+        container.addView(group, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
     }
 
     private fun title(container: LinearLayout, value: String) {
@@ -331,31 +345,23 @@ class MainActivity : Activity() {
     private fun hint(container: LinearLayout, value: String) {
         container.addView(text(value, 13f, muted = true),
             LinearLayout.LayoutParams(-1, -2).apply {
-                marginStart = dp(8); marginEnd = dp(8)
+                marginStart = dp(8); marginEnd = dp(8); bottomMargin = dp(8)
             })
     }
 
-    /** Settings options are a navigable Meltype page, never an OS modal. */
-    private fun choose(title: String, selected: Int, values: List<Pair<String, () -> Unit>>) {
-        choiceTitle = title
-        choiceSelected = selected
-        choiceOptions = values
-        returnChoicePage = page
-        navigate(Page.CHOICE)
-    }
-
-    private fun choice(content: LinearLayout) {
-        title(content, choiceTitle)
-        card(content) {
-            choiceOptions.forEachIndexed { index, option ->
-                if (index > 0) divider()
-                entry(option.first, if (index == choiceSelected) "選択中" else null,
-                    if (index == choiceSelected) "✓" else null, selected = index == choiceSelected) {
-                    option.second()
-                    navigate(returnChoicePage)
-                }
-            }
+    /** Opens a drop-down menu at [anchor] with [options]; [selected] is checked. */
+    private fun dropdown(anchor: View, selected: Int, options: List<Pair<String, () -> Unit>>) {
+        val menu = PopupMenu(this, anchor, Gravity.END)
+        options.forEachIndexed { index, option -> menu.menu.add(0, index, index, option.first) }
+        menu.menu.setGroupCheckable(0, true, true)
+        menu.menu.findItem(selected)?.isChecked = true
+        menu.setOnMenuItemClickListener { item ->
+            options.getOrNull(item.itemId)?.second?.invoke()
+            render()
+            true
         }
+        openDropdownForTest = menu
+        menu.show()
     }
 
     /** Remains accessible from the launcher even when the IME process crashes. */
@@ -371,6 +377,7 @@ class MainActivity : Activity() {
         startActivity(Intent(SystemSettings.ACTION_INPUT_METHOD_SETTINGS))
     }
 
+    /** 0: Meltype is enabled and selected. 1: not enabled. 2: enabled but another keyboard is selected. */
     private fun setupStatus(): Int {
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         val id = ComponentName(this, KeyboardService::class.java).flattenToShortString()
@@ -381,29 +388,11 @@ class MainActivity : Activity() {
     }
 
     /**
-     * Phones show one screen at a time. Expanded foldables keep the category
-     * list and selected section visible side-by-side, like Gboard.
+     * Draws the page again, keeping where it was scrolled to when it is the same page.
+     * On a wide screen the column stays readable.
      */
     private fun render() {
-        val expanded = resources.configuration.screenWidthDp >= 700
-        if (!expanded) {
-            setContentView(protectSystemBars(pane(page)))
-            return
-        }
-
-        val active = if (page == Page.HOME) Page.GENERAL else page
-        val split = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(theme.background)
-            addView(pane(Page.HOME, active), LinearLayout.LayoutParams(0, -1, 1f))
-            addView(View(this@MainActivity).apply { setBackgroundColor(theme.line) },
-                LinearLayout.LayoutParams(dp(1), -1))
-            addView(pane(active), LinearLayout.LayoutParams(0, -1, 1f))
-        }
-        setContentView(protectSystemBars(split))
-    }
-
-    private fun pane(target: Page, selected: Page? = null): ScrollView {
+        val scrolled = if (scrolledPage == page) scroller?.scrollY ?: 0 else 0
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(21), dp(10), dp(21), dp(40))
@@ -412,7 +401,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(56)
         }
-        if (target != Page.HOME) {
+        if (page != Page.HOME) {
             val back = text("‹", 31f).apply {
                 gravity = Gravity.CENTER
                 contentDescription = "戻る"
@@ -429,75 +418,149 @@ class MainActivity : Activity() {
                 marginEnd = dp(16)
             })
         }
-        top.addView(text(if (target == Page.HOME) "Meltype の設定" else "設定",
-            19f, strong = true))
+        top.addView(text(if (page == Page.HOME) "Meltype の設定" else "設定", 19f, strong = true))
         content.addView(top)
-        when (target) {
-            Page.HOME -> home(content, selected)
-            Page.LANGUAGES -> languages(content)
-            Page.GENERAL -> general(content)
-            Page.CORRECTION -> correction(content)
-            Page.EMOJI -> emoji(content)
+        when (page) {
+            Page.HOME -> sections(content)
             Page.DICTIONARY -> dictionaryPage(content)
             Page.PERSONAL -> personalPage(content)
             Page.WORD_EDIT -> wordEditor(content)
             Page.PERSONAL_EDIT -> personalEditor(content)
-            Page.CHOICE -> choice(content)
         }
-        return ScrollView(this).apply {
+        val column = FrameLayout(this).apply {
+            addView(content, FrameLayout.LayoutParams(
+                minOf(dp(MAX_COLUMN_DP), resources.displayMetrics.widthPixels), -2,
+                Gravity.CENTER_HORIZONTAL))
+        }
+        val view = ScrollView(this).apply {
             isFillViewport = true
             setBackgroundColor(theme.background)
-            addView(content)
+            addView(column)
         }
+        scroller = view
+        scrolledPage = page
+        setContentView(protectSystemBars(view))
+        if (scrolled > 0) view.post { view.scrollTo(0, scrolled) }
     }
 
-    private fun home(content: LinearLayout, selected: Page? = null) {
-        content.addView(View(this), LinearLayout.LayoutParams(1, dp(14)))
+    private fun sections(content: LinearLayout) {
+        // Shown only while Meltype is not enabled or not selected yet.
         when (setupStatus()) {
             1 -> card(content) {
-                entry("Meltypeを有効にする", "Androidのキーボード設定を開く", "⌨") {
+                entry("Meltypeを有効にする", "Androidのキーボード設定を開く") {
                     startActivity(Intent(SystemSettings.ACTION_INPUT_METHOD_SETTINGS))
                 }
             }
             2 -> card(content) {
-                entry("Meltypeを選択する", "入力方法として有効にする", "⌨") {
+                entry("Meltypeを選択する", "入力方法として有効にする") {
                     (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
                 }
             }
         }
-        // Never hide the emergency exits behind IME enable/selection state.
-        card(content, "緊急時の切り替え") {
-            entry("別のキーボードに切り替える",
-                "Meltypeが動かない場合もAndroidの切替画面を開く", "⌨") {
+        languages(content)
+        general(content)
+        clipboard(content)
+        card(content, "辞書") {
+            entry("ユーザー辞書", "読みから単語を変換する。一覧と登録") { navigate(Page.DICTIONARY) }
+        }
+        card(content, "個人情報") {
+            entry("メール・電話・住所", "入力の補完に使う。一覧と登録") { navigate(Page.PERSONAL) }
+        }
+        about(content)
+    }
+
+    private fun languages(content: LinearLayout) {
+        card(content, "言語") {
+            val romaji = settings.japaneseLayout == LayoutId.ROMAJI
+            entry("日本語", value = if (romaji) "QWERTY（ローマ字）" else "12キー（フリック）") { anchor ->
+                dropdown(anchor, if (romaji) 0 else 1,
+                    listOf("QWERTY（ローマ字）" to { settings.japaneseLayout = LayoutId.ROMAJI },
+                        "12キー（フリック）" to { settings.japaneseLayout = LayoutId.KANA }))
+            }
+            divider()
+            val qwerty = settings.englishLayout == LayoutId.QWERTY
+            entry("English", value = if (qwerty) "QWERTY" else "12-key flick") { anchor ->
+                dropdown(anchor, if (qwerty) 0 else 1,
+                    listOf("QWERTY" to { settings.englishLayout = LayoutId.QWERTY },
+                        "12-key flick" to { settings.englishLayout = LayoutId.LATIN_FLICK }))
+            }
+        }
+        hint(content, "日本語QWERTYでは、入力内容から日本語と英語を自動判別する。")
+    }
+
+    private fun general(content: LinearLayout) {
+        card(content, "設定") {
+            entry("振動", "キーを押したときに振動する",
+                checked = settings.hapticEnabled,
+                onToggle = { settings.hapticEnabled = it })
+            divider()
+            entry("12キーのトグル入力", "連続タップで同じキーの文字を切り替える",
+                checked = settings.toggleEnabled,
+                onToggle = { settings.toggleEnabled = it; render() })
+            if (settings.toggleEnabled) {
+                divider()
+                entry("トグル判定時間", value = waitText(settings.toggleWaitMs)) { anchor ->
+                    dropdown(anchor, progressOf(settings.toggleWaitMs),
+                        (0 until WAIT_STEPS).map { step ->
+                            waitText(waitOfProgress(step)) to { settings.toggleWaitMs = waitOfProgress(step) }
+                        })
+                }
+            }
+            divider()
+            entry("ライブ変換", "入力中に漢字・かなの変換候補を更新する",
+                checked = settings.liveConversionEnabled,
+                onToggle = { settings.liveConversionEnabled = it })
+            divider()
+            entry("絵文字", "絵文字キー・パネル・候補を表示する",
+                checked = settings.emojiEnabled,
+                onToggle = { settings.emojiEnabled = it })
+            divider()
+            val full = settings.japaneseSpaceFullWidth
+            entry("日本語入力時のスペース", value = if (full) "全角" else "半角") { anchor ->
+                dropdown(anchor, if (full) 1 else 0,
+                    listOf("半角" to { settings.japaneseSpaceFullWidth = false },
+                        "全角" to { settings.japaneseSpaceFullWidth = true }))
+            }
+        }
+    }
+
+    private fun clipboard(content: LinearLayout) {
+        card(content, "クリップボード") {
+            val days = ClipboardRetention.days(this@MainActivity)
+            entry("履歴の保存期間", value = days.toString() + "日") { anchor ->
+                val options = ClipboardRetention.OPTIONS
+                dropdown(anchor, options.indexOf(days),
+                    options.map { count ->
+                        (count.toString() + "日") to {
+                            ClipboardRetention.setDays(this@MainActivity, count)
+                            Thread {
+                                ClipboardHistoryStore(applicationContext).prune()
+                            }.start()
+                        }
+                    })
+            }
+            divider()
+            val source = RecentScreenshotSource(this@MainActivity)
+            entry("最近のスクリーンショット",
+                if (source.enabled()) "画像候補を表示する（許可済み）"
+                else "写真へのアクセスを許可すると画像チップを表示できる") { configureScreenshotSuggestions() }
+        }
+        hint(content, "保存期間を短くすると、期限を過ぎた履歴と画像は削除される。")
+    }
+
+    private fun about(content: LinearLayout) {
+        card(content, "このアプリについて") {
+            entry("ライセンス", "オープンソースに関する情報") {
+                startActivity(Intent(this@MainActivity, LicensesActivity::class.java))
+            }
+            divider()
+            // The way out when the keyboard does not work: never hidden behind the setup state.
+            entry("別のキーボードに切り替える", "Meltypeが動かないときもAndroidの切替画面を開く") {
                 showSystemKeyboardPicker()
             }
             divider()
-            entry("Androidのキーボード設定を開く",
-                "ほかのキーボードを選び直す", "⚙") {
+            entry("Androidのキーボード設定を開く", "ほかのキーボードを選び直す") {
                 showSystemKeyboardSettings()
-            }
-        }
-        card(content) {
-            entry("言語", "日本語・English", "◎", selected = selected == Page.LANGUAGES) { navigate(Page.LANGUAGES) }
-            divider()
-            entry("設定", "スペース・振動・キー操作", "☷", selected = selected == Page.GENERAL) { navigate(Page.GENERAL) }
-        }
-        card(content) {
-            entry("ユーザー辞書", "読みから単語を変換", "▤",
-                selected = selected == Page.DICTIONARY) { navigate(Page.DICTIONARY) }
-            divider()
-            entry("個人情報", "メールアドレス・電話番号・住所", "◉",
-                selected = selected == Page.PERSONAL) { navigate(Page.PERSONAL) }
-            divider()
-            entry("修正と候補", "ライブ変換・入力候補", "✓", selected = selected == Page.CORRECTION) { navigate(Page.CORRECTION) }
-            divider()
-            entry("絵文字", if (settings.emojiEnabled) "有効" else "無効", "☺", selected = selected == Page.EMOJI) {
-                navigate(Page.EMOJI)
-            }
-        }
-        card(content) {
-            entry("ライセンス", "オープンソースに関する情報", "ⓘ") {
-                startActivity(Intent(this@MainActivity, LicensesActivity::class.java))
             }
         }
     }
@@ -507,7 +570,7 @@ class MainActivity : Activity() {
         title(content, "ユーザー辞書")
         hint(content, "読みを入力すると、登録した単語を変換候補に表示します。")
         card(content) {
-            entry("＋ 単語を登録", "読み・単語を設定", "＋") {
+            entry("＋ 単語を登録", "読み・単語を設定") {
                 editingWord = null
                 navigate(Page.WORD_EDIT)
             }
@@ -521,7 +584,7 @@ class MainActivity : Activity() {
             }
             list.forEachIndexed { index, word ->
                 if (index > 0) divider()
-                entry(word.word, word.reading, "▤") {
+                entry(word.word, word.reading) {
                     editingWord = word
                     navigate(Page.WORD_EDIT)
                 }
@@ -539,7 +602,7 @@ class MainActivity : Activity() {
             Triple("address", "住所", "住所を登録")
         )) {
             card(content, heading) {
-                entry("＋ " + prompt, "タップして登録", "＋") {
+                entry("＋ " + prompt, "タップして登録") {
                     personalKind = kind
                     editingWord = null
                     navigate(Page.PERSONAL_EDIT)
@@ -547,7 +610,7 @@ class MainActivity : Activity() {
                 val items = all.filter { PersonalCompleter.kindOf(it.word) == kind }
                 items.forEach { word ->
                     divider()
-                    entry(word.word, if (kind == "phone") "3-4-4分割にも対応" else null, "◉") {
+                    entry(word.word, if (kind == "phone") "3-4-4分割にも対応" else null) {
                         personalKind = kind
                         editingWord = word
                         navigate(Page.PERSONAL_EDIT)
@@ -673,100 +736,10 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(9) })
     }
 
-    private fun languages(content: LinearLayout) {
-        title(content, "言語")
-        card(content, "入力レイアウト") {
-            entry("日本語", if (settings.japaneseLayout == LayoutId.ROMAJI)
-                "QWERTY（ローマ字）" else "12キー（フリック）") {
-                choose("日本語の入力", if (settings.japaneseLayout == LayoutId.ROMAJI) 0 else 1,
-                    listOf("QWERTY（ローマ字）" to { settings.japaneseLayout = LayoutId.ROMAJI },
-                        "12キー（フリック）" to { settings.japaneseLayout = LayoutId.KANA }))
-            }
-            divider()
-            entry("English", if (settings.englishLayout == LayoutId.QWERTY)
-                "QWERTY" else "12-key flick") {
-                choose("英語の入力", if (settings.englishLayout == LayoutId.QWERTY) 0 else 1,
-                    listOf("QWERTY" to { settings.englishLayout = LayoutId.QWERTY },
-                        "12-key flick" to { settings.englishLayout = LayoutId.LATIN_FLICK }))
-            }
-        }
-        hint(content, "日本語QWERTYでは、入力内容から日本語と英語を自動判別する。")
-    }
-
-    private fun general(content: LinearLayout) {
-        title(content, "設定")
-        card(content, "キー") {
-            entry("日本語入力時のスペース", if (settings.japaneseSpaceFullWidth) "全角" else "半角") {
-                choose("日本語入力時のスペース", if (settings.japaneseSpaceFullWidth) 0 else 1,
-                    listOf("全角" to { settings.japaneseSpaceFullWidth = true },
-                        "半角" to { settings.japaneseSpaceFullWidth = false }))
-            }
-            divider()
-            entry("キー入力時に振動", "キーを押したときの触覚フィードバック",
-                checked = settings.hapticEnabled,
-                onToggle = { settings.hapticEnabled = it })
-        }
-        card(content, "12キー") {
-            entry("トグル入力", "連続タップで同じキーの文字を切り替える",
-                checked = settings.toggleEnabled,
-                onToggle = { settings.toggleEnabled = it; render() })
-            if (settings.toggleEnabled) {
-                divider()
-                entry("トグル判定時間", waitText(settings.toggleWaitMs)) { timing() }
-            }
-        }
-        card(content, "クリップボード") {
-            val source = RecentScreenshotSource(this@MainActivity)
-            entry("最近のスクリーンショット",
-                if (source.enabled()) "画像候補を表示する（許可済み）"
-                else "写真へのアクセスを許可すると画像チップを表示できる",
-                symbol = "▧") { configureScreenshotSuggestions() }
-            divider()
-            val days = ClipboardRetention.days(this@MainActivity)
-            entry("履歴の保存期間", days.toString() + "日") {
-                val options = ClipboardRetention.OPTIONS
-                choose("クリップボード履歴の保存期間", options.indexOf(days),
-                    options.map { count ->
-                        (count.toString() + "日") to {
-                            ClipboardRetention.setDays(this@MainActivity, count)
-                            Thread {
-                                ClipboardHistoryStore(applicationContext).prune()
-                            }.start()
-                        }
-                    })
-            }
-        }
-        hint(content, "保存期間を短くすると、期限を過ぎた履歴と画像は削除される。")
-    }
-
-    private fun timing() {
-        choose("トグル判定時間", progressOf(settings.toggleWaitMs),
-            (0 until WAIT_STEPS).map { index ->
-                waitText(waitOfProgress(index)) to { settings.toggleWaitMs = waitOfProgress(index) }
-            })
-    }
-
-    private fun correction(content: LinearLayout) {
-        title(content, "修正と候補")
-        card(content, "変換") {
-            entry("ライブ変換", "入力途中に漢字・かなの変換候補を更新する",
-                checked = settings.liveConversionEnabled,
-                onToggle = { settings.liveConversionEnabled = it })
-        }
-        hint(content, "日英自動判別と予測候補は、ライブ変換とは独立して動作する。")
-    }
-
-    private fun emoji(content: LinearLayout) {
-        title(content, "絵文字")
-        card(content) {
-            entry("絵文字を使う", "絵文字キー・パネル・候補の表示",
-                checked = settings.emojiEnabled,
-                onToggle = { settings.emojiEnabled = it })
-        }
-    }
-
     companion object {
         private const val SCREENSHOT_ACCESS_REQUEST = 7214
+        /** The widest the settings column gets (unfolded and large screens). */
+        private const val MAX_COLUMN_DP = 640
         private const val WAIT_STEPS = 18
         private const val WAIT_BASE_MS = 300
         private const val WAIT_STEP_MS = 100

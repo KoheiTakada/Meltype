@@ -313,6 +313,105 @@ class ImeLaunchDeviceTest {
         }
     }
 
+    private fun shownKeys(): io.github.ninjin0802.keyboard.app.view.KeyboardView =
+        KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest() ?: throw AssertionError("Keys not shown")
+
+    /** Opens the first symbol page with ?123, types [symbol] there and goes back to the letters. */
+    private fun typeFromSymbols(symbol: String) {
+        val letters = shownKeys().layout.id
+        tap(shownKeys(), "?123") { it == KeyAction.Switch(io.github.ninjin0802.keyboard.app.layout.LayoutId.SYMBOLS) }
+        waitUntil("the symbol page is shown") {
+            shownKeys().layout.id == io.github.ninjin0802.keyboard.app.layout.LayoutId.SYMBOLS
+        }
+        tap(shownKeys(), symbol) { it == KeyAction.Text(symbol) }
+        tap(shownKeys(), "back to the letters") { it == KeyAction.Back }
+        waitUntil("the letters are shown again") { shownKeys().layout.id == letters }
+    }
+
+    private fun composingStart(editor: android.widget.EditText) =
+        android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)
+
+    /**
+     * Japanese QWERTY sends the symbols of the symbol page to the Core as typed characters, and the
+     * Core decides their width, as on the Mac: ! and ? after Japanese are full-width.
+     */
+    @Test fun symbolsAfterJapaneseAreTheCoresFullWidth() = withRomajiActivity { activity ->
+        val editor = activity.japaneseEditor
+        focusJapanese(activity, editor)
+        clear(editor)
+        focusJapanese(activity, editor)
+        typeRomaji("sorena")
+        typeFromSymbols("!")
+        typeFromSymbols("?")
+        assertTrue("The symbols are part of what is being typed: " + editor.text, composingStart(editor) >= 0)
+        typeRomaji("\n")
+        waitUntil("the sentence is committed", describe = { "text=" + editor.text }) {
+            editor.text.isNotEmpty() && composingStart(editor) < 0
+        }
+        val text = editor.text.toString()
+        assertTrue("! and ? after Japanese are full-width: $text", text.endsWith("！？"))
+        assertTrue("No half-width ! or ?: $text", '!' !in text && '?' !in text)
+    }
+
+    /** The reverse: where the Core is not used (an email field, English QWERTY), ? and ! stay as typed. */
+    @Test fun symbolsInAnEmailFieldStayHalfWidth() = withRomajiActivity { activity ->
+        val editor = activity.editor
+        fun focusEnglish() {
+            requestKeyboard(activity, editor)
+            waitUntil("English QWERTY keyboard for the email field", millis = 45_000, retryEveryMillis = 2_000,
+                retry = { requestKeyboard(activity, editor) }, describe = { describeImeState(activity) }) {
+                editor.hasFocus() && KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()?.layout?.id ==
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY
+            }
+        }
+        focusEnglish()
+        clear(editor)
+        focusEnglish()
+        typeFromSymbols("?")
+        typeFromSymbols("!")
+        waitUntil("? and ! are typed as they are", describe = { "text=" + editor.text }) {
+            editor.text.toString() == "?!"
+        }
+    }
+
+    /**
+     * Space in Japanese QWERTY goes to the Core also when nothing is being typed, so the Core's
+     * SpaceWidth decides it: half-width by default, full-width when chosen in the settings.
+     */
+    @Test fun spaceIsTheCoresSpaceWidth() = withRomajiActivity { activity ->
+        val config = io.github.ninjin0802.keyboard.app.core.CoreConfig(
+            io.github.ninjin0802.keyboard.app.core.coreDataDirectory(target))
+        val previous = config.string(io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_WIDTH)
+        fun spaceWidth(value: String) {
+            assertTrue(config.set(io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_WIDTH, value))
+            // The Core reads config.json again within a second (SettingsFile).
+            Thread.sleep(1_300)
+        }
+        try {
+            spaceWidth(io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_STANDARD)
+            val editor = activity.japaneseEditor
+            focusJapanese(activity, editor)
+            clear(editor)
+            focusJapanese(activity, editor)
+            typeRomaji("ka\n")
+            waitUntil("か is committed", describe = { "text=" + editor.text }) {
+                editor.text.toString() == "か" && composingStart(editor) < 0
+            }
+            typeRomaji(" ")
+            waitUntil("a half-width space by default", describe = { "text=" + editor.text }) {
+                editor.text.toString() == "か "
+            }
+            spaceWidth(io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_FULL_WIDTH)
+            typeRomaji(" ")
+            waitUntil("a full-width space when chosen", describe = { "text=" + editor.text }) {
+                editor.text.toString() == "か 　"
+            }
+        } finally {
+            config.set(io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_WIDTH,
+                previous ?: io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_STANDARD)
+        }
+    }
+
     @Test fun selectedKeyboardOpensAndTypesThroughOnscreenTouch() {
         val expectedIme = target.packageName + "/" + KeyboardService::class.java.name
         assertEquals("The actual keyboard must be the system-selected default",
