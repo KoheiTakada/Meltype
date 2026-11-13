@@ -68,6 +68,13 @@ class ImeLaunchDeviceTest {
         }
     }
 
+    private fun keysOnScreen(keys: io.github.ninjin0802.keyboard.app.view.KeyboardView?): String {
+        if (keys == null) return ""
+        val at = IntArray(2)
+        keys.getLocationOnScreen(at)
+        return "@" + at[0] + "," + at[1]
+    }
+
     private fun describeImeState(activity: ImeSmokeActivity): String {
         val service = KeyboardService.activeForSmokeTest?.get()
         val keys = service?.activeKeysForSmokeTest()
@@ -82,7 +89,10 @@ class ImeLaunchDeviceTest {
             ", defaultIme=" + defaultIme +
             ", serviceCreated=" + (service != null) +
             ", inputViewShown=" + service?.isInputViewShown +
-            ", keys=" + size + ")"
+            ", keys=" + size + keysOnScreen(keys) + " " + keys?.layout?.id +
+            ", editor=" + service?.editorForSmokeTest() +
+            ", touches=[" + keys?.touchLogForSmokeTest + "]" +
+            ", handled=[" + service?.smokeKeyLog + "])"
     }
 
     /** A visible view alone can belong to the previous editor during a window transition. */
@@ -409,6 +419,56 @@ class ImeLaunchDeviceTest {
         } finally {
             config.set(io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_WIDTH,
                 previous ?: io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_STANDARD)
+        }
+    }
+
+    /**
+     * An editor that restarts the input right after the first character (as Chrome does in many web
+     * forms) must keep what is being typed: k then a is か, not a lost k (or a committed k + あ).
+     */
+    @Test fun aRestartAfterTheFirstCharacterKeepsWhatIsBeingTyped() = withRomajiActivity { activity ->
+        val editor = activity.restartingEditor
+        focusJapanese(activity, editor)
+        val starts = KeyboardService.activeForSmokeTest?.get()?.inputStartsForSmokeTest ?: 0
+        typeRomaji("k")
+        // The restart reaches the keyboard before the next key, as it does for a person typing.
+        waitUntil("the editor restarted the input after the first character", describe = { "text=" + editor.text }) {
+            activity.restarts == 1 && (KeyboardService.activeForSmokeTest?.get()?.inputStartsForSmokeTest ?: 0) > starts
+        }
+        focusJapanese(activity, editor)
+        typeRomaji("a\n")
+        waitUntil("ka is か", describe = { "text=" + editor.text + " " + describeImeState(activity) }) {
+            editor.text.toString() == "か" && composingStart(editor) < 0
+        }
+    }
+
+    /** Focuses the email field and waits until the English QWERTY keyboard writes to it. */
+    private fun focusEmail(activity: ImeSmokeActivity) {
+        requestKeyboard(activity, activity.editor)
+        waitUntil("the email field owns the English QWERTY keyboard", millis = 45_000, retryEveryMillis = 2_000,
+            retry = { requestKeyboard(activity, activity.editor) }, describe = { describeImeState(activity) }) {
+            isImeReadyFor(activity, activity.editor, io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY)
+        }
+    }
+
+    /**
+     * A key typed while the editor is restarting the input (Chrome restarts it when a web form field
+     * gets focus) reaches the editor's old, closed connection. It must still be typed: a, not nothing.
+     */
+    @Test fun aKeyTypedWhileTheEditorRestartsTheInputIsNotLost() = withRomajiActivity { activity ->
+        val editor = activity.editor
+        focusEmail(activity)
+        clear(editor)
+        focusEmail(activity)
+        val keyboard = shownKeys()
+        val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        // Restart and type at once, before the restart reaches the keyboard.
+        instrumentation.runOnMainSync { imm.restartInput(editor) }
+        tap(keyboard, "a") { (it as? KeyAction.Text)?.text == "a" }
+        focusEmail(activity)
+        tap(shownKeys(), "s") { (it as? KeyAction.Text)?.text == "s" }
+        waitUntil("both keys are typed", describe = { "text=" + editor.text + " " + describeImeState(activity) }) {
+            editor.text.toString() == "as"
         }
     }
 
