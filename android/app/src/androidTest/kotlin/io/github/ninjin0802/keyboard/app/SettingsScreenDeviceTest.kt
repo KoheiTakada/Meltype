@@ -97,7 +97,8 @@ class SettingsScreenDeviceTest {
                 "絵文字", "日本語入力時のスペース", "クリップボード", "履歴の保存期間", "辞書", "ユーザー辞書",
                 "個人情報", "メール・電話・住所", "このアプリについて", "ライセンス",
                 "別のキーボードに切り替える", "Androidのキーボード設定を開く")
-            val positions = order.map { title -> shown.indexOf(title).also { assertTrue("No $title in $shown", it >= 0) } }
+            // The setup row's detail can repeat a title further up ("Androidのキーボード設定を開く"): take the last.
+            val positions = order.map { title -> shown.lastIndexOf(title).also { assertTrue("No $title in $shown", it >= 0) } }
             assertEquals("Sections and rows are out of order: $shown", positions.sorted(), positions)
             // The old category pages and their entries are gone; there is no demo editor.
             for (gone in listOf("修正と候補", "入力レイアウト", "緊急時の切り替え", "試し書き", "済み", "選択中")) {
