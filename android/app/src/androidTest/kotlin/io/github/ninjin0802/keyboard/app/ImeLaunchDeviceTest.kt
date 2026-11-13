@@ -68,6 +68,13 @@ class ImeLaunchDeviceTest {
         }
     }
 
+    private fun keysOnScreen(keys: io.github.ninjin0802.keyboard.app.view.KeyboardView?): String {
+        if (keys == null) return ""
+        val at = IntArray(2)
+        keys.getLocationOnScreen(at)
+        return "@" + at[0] + "," + at[1]
+    }
+
     private fun describeImeState(activity: ImeSmokeActivity): String {
         val service = KeyboardService.activeForSmokeTest?.get()
         val keys = service?.activeKeysForSmokeTest()
@@ -82,7 +89,10 @@ class ImeLaunchDeviceTest {
             ", defaultIme=" + defaultIme +
             ", serviceCreated=" + (service != null) +
             ", inputViewShown=" + service?.isInputViewShown +
-            ", keys=" + size + ")"
+            ", keys=" + size + keysOnScreen(keys) + " " + keys?.layout?.id +
+            ", editor=" + service?.editorForSmokeTest() +
+            ", touches=[" + keys?.touchLogForSmokeTest + "]" +
+            ", handled=[" + service?.smokeKeyLog + "])"
     }
 
     /** A visible view alone can belong to the previous editor during a window transition. */

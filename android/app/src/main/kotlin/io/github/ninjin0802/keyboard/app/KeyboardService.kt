@@ -238,6 +238,17 @@ class KeyboardService : InputMethodService(), KeyListener {
     /** The Core's last view (smoke test only). */
     internal fun coreViewForSmokeTest(): ImeView? = coreInput.view
 
+    /** The keys handled lately and the editor each went to (smoke test only). */
+    @Volatile internal var smokeKeyLog: String = ""
+        private set
+
+    /** The editor the keyboard writes to now, and the layout shown (smoke test only). */
+    internal fun editorForSmokeTest(): String {
+        val info = currentInputEditorInfo
+        return "layout=" + nav.current + " field=" + (info?.inputType?.let { Integer.toHexString(it) }) +
+            "/" + info?.fieldId + " connection=" + (currentInputConnection != null) + " started=" + coreInField
+    }
+
     /** The candidate bar, to tap a candidate as a finger would (smoke test only). */
     internal fun candidateBarForSmokeTest(): CandidateBarView? = candidateBar
 
@@ -640,6 +651,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     override fun onKey(action: KeyAction, direction: Direction, timeMs: Long) {
         // 1つのキーで確定と入力の両方が起きることがある。入力欄には、まとめて1回の操作として届ける。
         val connection = currentInputConnection
+        smokeKeyLog = (smokeKeyLog + " | " + action.javaClass.simpleName + "@" + editorForSmokeTest()).takeLast(600)
         val start = System.nanoTime()
         connection?.beginBatchEdit()
         try {
