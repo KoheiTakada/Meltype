@@ -23,7 +23,6 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
 import android.text.InputType
@@ -56,8 +55,8 @@ class MainActivity : Activity() {
     private var scroller: ScrollView? = null
     private var scrolledPage: Page? = null
 
-    /** The last drop-down menu opened (device tests choose an item in it). */
-    internal var openDropdownForTest: PopupMenu? = null
+    /** The last drop-down list opened (device tests choose an item in it). */
+    internal var openDropdownForTest: AppDropdown? = null
         private set
 
     // Android 13+ gesture Back dispatches through this callback. Earlier
@@ -184,14 +183,13 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    /** Screenshot access is opt-in and requested only from this dedicated settings row. */
+    /**
+     * Screenshot access is opt-in and requested only from this dedicated settings row, which is
+     * shown only until the screenshots are allowed and on.
+     */
     private fun configureScreenshotSuggestions() {
         val source = RecentScreenshotSource(this)
-        if (source.enabled()) {
-            source.setEnabled(false)
-            render()
-            return
-        }
+        if (source.enabled()) return
         if (source.hasFullImageAccess()) {
             source.setEnabled(true)
             render()
@@ -349,19 +347,14 @@ class MainActivity : Activity() {
             })
     }
 
-    /** Opens a drop-down menu at [anchor] with [options]; [selected] is checked. */
+    /** Opens a drop-down list at [anchor] with [options]; [selected] is the current one. */
     private fun dropdown(anchor: View, selected: Int, options: List<Pair<String, () -> Unit>>) {
-        val menu = PopupMenu(this, anchor, Gravity.END)
-        options.forEachIndexed { index, option -> menu.menu.add(0, index, index, option.first) }
-        menu.menu.setGroupCheckable(0, true, true)
-        menu.menu.findItem(selected)?.isChecked = true
-        menu.setOnMenuItemClickListener { item ->
-            options.getOrNull(item.itemId)?.second?.invoke()
+        val list = AppDropdown(this, options.map { it.first }, selected) { index ->
+            options[index].second()
             render()
-            true
         }
-        openDropdownForTest = menu
-        menu.show()
+        openDropdownForTest = list
+        list.show(anchor)
     }
 
     /** Remains accessible from the launcher even when the IME process crashes. */
@@ -539,11 +532,16 @@ class MainActivity : Activity() {
                         }
                     })
             }
-            divider()
+            // Shown until the screenshots are allowed and on; then the row is no longer needed.
             val source = RecentScreenshotSource(this@MainActivity)
-            entry("最近のスクリーンショット",
-                if (source.enabled()) "画像候補を表示する（許可済み）"
-                else "写真へのアクセスを許可すると画像チップを表示できる") { configureScreenshotSuggestions() }
+            if (!source.enabled()) {
+                divider()
+                entry("最近のスクリーンショット",
+                    if (source.hasFullImageAccess()) "タップすると、最近のスクリーンショットを候補に出す"
+                    else "写真へのアクセスを許可すると、最近のスクリーンショットを候補に出す") {
+                    configureScreenshotSuggestions()
+                }
+            }
         }
         hint(content, "保存期間を短くすると、期限を過ぎた履歴と画像は削除される。")
     }

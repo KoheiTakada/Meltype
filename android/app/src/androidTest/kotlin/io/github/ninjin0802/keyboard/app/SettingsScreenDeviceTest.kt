@@ -193,14 +193,13 @@ class SettingsScreenDeviceTest {
             instrumentation.runOnMainSync {
                 val menu = activity.openDropdownForTest
                 assertNotNull("The row opens a drop-down menu", menu)
-                val items = (0 until menu!!.menu.size()).map { menu.menu.getItem(it).title.toString() }
-                assertEquals(listOf("QWERTY（ローマ字）", "12キー（フリック）"), items)
-                assertTrue(menu.menu.getItem(if (previous == LayoutId.ROMAJI) 0 else 1).isChecked)
+                assertEquals(listOf("QWERTY（ローマ字）", "12キー（フリック）"), menu!!.labels)
+                assertTrue("The list is open", menu.isShowing)
+                assertEquals(if (previous == LayoutId.ROMAJI) 0 else 1, menu.selected)
                 // Still the same page: the choice did not open another one.
                 assertNotNull(findText(activity.window.decorView, "Meltype の設定"))
                 val other = if (previous == LayoutId.ROMAJI) 1 else 0
-                assertTrue(menu.menu.performIdentifierAction(other, 0))
-                menu.dismiss()
+                menu.pick(other)
             }
             instrumentation.waitForIdleSync()
             val chosen = if (previous == LayoutId.ROMAJI) LayoutId.KANA else LayoutId.ROMAJI
@@ -224,9 +223,8 @@ class SettingsScreenDeviceTest {
                 instrumentation.waitForIdleSync()
                 instrumentation.runOnMainSync {
                     val menu = activity.openDropdownForTest!!
-                    assertEquals(listOf("半角", "全角"), (0 until menu.menu.size()).map { menu.menu.getItem(it).title.toString() })
-                    assertTrue(menu.menu.performIdentifierAction(index, 0))
-                    menu.dismiss()
+                    assertEquals(listOf("半角", "全角"), menu.labels)
+                    menu.pick(index)
                 }
                 instrumentation.waitForIdleSync()
             }
@@ -405,11 +403,23 @@ class SettingsScreenDeviceTest {
             instrumentation.runOnMainSync {
                 val menu = activity.openDropdownForTest
                 assertNotNull("The retention row opens a drop-down menu", menu)
-                val items = (0 until menu!!.menu.size()).map { menu.menu.getItem(it).title.toString() }
-                assertEquals(io.github.ninjin0802.keyboard.app.clipboard.ClipboardRetention.OPTIONS.map { "${it}日" }, items)
+                assertEquals(io.github.ninjin0802.keyboard.app.clipboard.ClipboardRetention.OPTIONS.map { "${it}日" }, menu!!.labels)
+                assertEquals(io.github.ninjin0802.keyboard.app.clipboard.ClipboardRetention.OPTIONS
+                    .indexOf(io.github.ninjin0802.keyboard.app.clipboard.ClipboardRetention.days(activity)), menu.selected)
                 menu.dismiss()
                 assertNotNull("Still the settings page", findText(activity.window.decorView, "Meltype の設定"))
             }
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
+    /** The screenshot row asks for photo access; it is shown until screenshots are allowed and on. */
+    @Test fun screenshotRowIsShownUntilScreenshotsAreAllowed() {
+        val activity = open()
+        try {
+            val allowed = io.github.ninjin0802.keyboard.app.clipboard.RecentScreenshotSource(activity).enabled()
+            assertEquals("最近のスクリーンショット" in page(activity), !allowed)
         } finally {
             instrumentation.runOnMainSync { activity.finish() }
         }

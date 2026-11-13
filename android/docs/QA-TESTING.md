@@ -67,6 +67,7 @@ Mozcの初回ソースビルドは大量の依存を取得する。版・SHAを�
 | B08 | japaneseSpaceIsTheCoreSpaceWidth | 日本語入力時のスペースで 全角→半角 を選ぶ | config.json の SpaceWidth が FullWidth→Standard |
 | B09 | backFromTheDictionaryReturnsToTheSettingsPage | 個人版: ユーザー辞書を開く→画面内の戻る、再び開く→OS Back | どちらも設定の1画面に戻り、アプリは閉じない |
 | B10 | clipboardRetentionIsADropDownOnTheSettingsPage | 個人版: 履歴の保存期間をタップ | 1日〜365日のプルダウンがその場で開く |
+| B11 | screenshotRowIsShownUntilScreenshotsAreAllowed | 個人版: 設定を開く | 最近のスクリーンショットが許可・有効になっていなければ行を出し、なっていれば出さない |
 | C01 | aRecommitReplacesThePreviousWordInTheEditor | i want␣ | I want␣（前の語の確定し直しが入力欄に正しく入り、キャレットは末尾） |
 | C02 | aCaretMovedElsewhereKeepsThePreviousWord | i␣Enter のあと CaretMoved→want␣ | キャレット移動前に確定した語を書き換えない |
 | C03 | removeBeforeTakesAwayTheComposingTextFirst | 「い 」＋変換中 want → removeBefore=「い 」 | 変換中の文字を消してから前を消し、I want␣ を入れる |

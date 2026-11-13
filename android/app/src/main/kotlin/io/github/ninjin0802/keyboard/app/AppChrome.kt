@@ -16,6 +16,9 @@ import android.view.WindowInsets
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Checkable
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.PopupWindow
+import android.widget.ScrollView
 import android.widget.TextView
 
 /** Shared Meltype look for Settings, Dictionary, Clipboard editing and future screens. */
@@ -183,5 +186,77 @@ class AppToggle(context: Context) : View(context), Checkable {
         super.onInitializeAccessibilityNodeInfo(info)
         info.isCheckable = true
         info.isChecked = checked
+    }
+}
+
+/**
+ * A drop-down list that opens at its row, in Meltype's own look (no platform menu): the choices
+ * on a rounded card, the current one in the accent color. Picking one closes it and calls [onPick].
+ */
+class AppDropdown(
+    private val context: Context,
+    /** The choices, top to bottom. */
+    val labels: List<String>,
+    /** The current choice (-1 for none). */
+    val selected: Int,
+    private val onPick: (Int) -> Unit,
+) {
+    private fun dp(n: Int) = AppChrome.dp(context, n)
+    private val width = dp(WIDTH_DP)
+    private val window: PopupWindow
+
+    init {
+        val colors = AppChrome.colors(context)
+        val list = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        labels.forEachIndexed { index, label ->
+            val chosen = index == selected
+            list.addView(AppChrome.text(context, label, 15f, strong = chosen).apply {
+                if (chosen) setTextColor(colors.accent)
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                minHeight = dp(ROW_DP)
+                setPadding(dp(18), 0, dp(18), 0)
+                isClickable = true
+                isFocusable = true
+                isSelected = chosen
+                setOnClickListener { pick(index) }
+            }, LinearLayout.LayoutParams(-1, dp(ROW_DP)))
+        }
+        val card = ScrollView(context).apply {
+            background = AppChrome.shape(context, colors.card, 16, colors.divider)
+            clipToOutline = true
+            isVerticalScrollBarEnabled = true
+            addView(list)
+        }
+        val height = minOf(labels.size * dp(ROW_DP) + dp(12), dp(MAX_HEIGHT_DP))
+        window = PopupWindow(card, width, height, true).apply {
+            elevation = dp(8).toFloat()
+            isOutsideTouchable = true
+        }
+        // Show the current choice when the list scrolls.
+        if (selected > 0) card.post { card.scrollTo(0, (selected * dp(ROW_DP) - height / 2).coerceAtLeast(0)) }
+    }
+
+    val isShowing: Boolean get() = window.isShowing
+
+    /** Opens the list under [anchor], at its right edge. */
+    fun show(anchor: View) {
+        window.showAsDropDown(anchor, anchor.width - width - dp(12), -dp(8))
+    }
+
+    /** Picks the choice at [index], as a tap on it does. */
+    fun pick(index: Int) {
+        window.dismiss()
+        if (index in labels.indices) onPick(index)
+    }
+
+    fun dismiss() = window.dismiss()
+
+    private companion object {
+        const val WIDTH_DP = 232
+        const val ROW_DP = 48
+        const val MAX_HEIGHT_DP = 340
     }
 }
