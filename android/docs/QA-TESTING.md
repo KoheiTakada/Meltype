@@ -57,11 +57,14 @@ Mozcの初回ソースビルドは大量の依存を取得する。版・SHAを�
 | A18 | symbolsAfterEnglishStayAsTyped | let's go! / taro@example.com | let's go! / taro@example.com（英語の後ろ・メールアドレスは打ったまま） |
 | A19 | freshSettingsDefaultToRomajiHalfWidthAndNoEmoji | 設定が何もない状態 | ローマ字配列・スペース半角・絵文字OFF。全角にすると config.json の SpaceWidth が FullWidth |
 | A20 | earlierFullWidthSpaceMovesToTheCore | 前の版の設定（日本語スペース全角）だけがある | キーボードの起動時に config.json の SpaceWidth=FullWidth に移し、前の設定を消す |
-| B01 | homeHasGboardStyleCategoriesWithoutDemoOrCompletedSteps | 設定ホームを開く | 4カテゴリがあり試し書き等がない |
+| B01 | onePageHasTheSectionsAndRowsInOrder | 設定を開く | 1画面に 言語→設定→このアプリについて の順で項目が並ぶ。カテゴリ別の画面・緊急時の切り替えの見出し・試し書きはない。未完了のセットアップはいちばん上 |
 | B02 | liveConversionSwitchChangesAndPersistsItsValue | ライブ変換を切替 | 表示値と保存値が一致し、Core の config.json の LiveConversion に書かれる |
-| B03 | systemBarsAreRespectedOnHomeAndDetailScreens | 実Insets・合成Insetsを設定 | 上端/下端のシステムUIと非重複 |
-| B04 | toolbarBackAndSystemBackBothReturnToSettingsHome | 画面内戻る→再入→OS Back | 両方とも設定ホームに復帰 |
-| B05 | unfoldedScreenKeepsCategoriesBesideActiveSettings | 設定を幅700dp以上/未満で表示 | 広画面2ペイン、狭画面スクロール |
+| B03 | systemBarsAreRespectedWhenThePageIsDrawnAgain | 実Insets・合成Insetsを設定、トグルで画面を描き直す | 上端/下端のシステムUIと非重複 |
+| B04 | choicesOpenAsDropDownsOnTheSamePage | 「日本語」の行をタップ→もう一方を選ぶ | その場でプルダウンが開き（画面は移らない）、選んだ配列が保存され、行に表示される |
+| B05 | wideScreensKeepOneReadableColumn | 設定を開く | 1つのスクロール画面。列の幅は640dpまで |
+| B06 | launcherAlwaysOffersEscapeWhenTheInputMethodCannotStart | 設定を開く | 「別のキーボードに切り替える」「Androidのキーボード設定を開く」がいつも押せる |
+| B07 | settingsAreSwitchesAndToggleWaitFollowsTheToggle | 12キーのトグル入力をOFF→ON | 振動・トグル入力・ライブ変換・絵文字はスイッチ。トグル判定時間はONのときだけ、トグル入力のすぐ下に出る |
+| B08 | japaneseSpaceIsTheCoreSpaceWidth | 日本語入力時のスペースで 全角→半角 を選ぶ | config.json の SpaceWidth が FullWidth→Standard |
 | C01 | aRecommitReplacesThePreviousWordInTheEditor | i want␣ | I want␣（前の語の確定し直しが入力欄に正しく入り、キャレットは末尾） |
 | C02 | aCaretMovedElsewhereKeepsThePreviousWord | i␣Enter のあと CaretMoved→want␣ | キャレット移動前に確定した語を書き換えない |
 | C03 | removeBeforeTakesAwayTheComposingTextFirst | 「い 」＋変換中 want → removeBefore=「い 」 | 変換中の文字を消してから前を消し、I want␣ を入れる |
@@ -103,7 +106,7 @@ A04〜A06、A14〜A15、C03〜C04はCoreの応答の形（ImeOutput）の固定J
 | M05 | 開閉と回転 | 候補・絵文字パネルの表示 | レイアウト追従・重なり無し |
 | M06 | 日本語QWERTY | 、。!?＋記号2ページ＋Space長押し→指を離さず上下スワイプ→選択した行で指を離す | 押下位置の真上に吹き出し表示、選択行を強調し、指を離した位置で言語が切り替わる。メニュー外ではキャンセル、空白の誤入力なし |
 | M07 | 変換確定 | nihongo→Space→Enter | 重複・欠落なく確定。候補バーにはCoreの一覧だけが出る |
-| M08 | 設定 | 保存と戻る操作 | 設定保存、ステータスバー非重複 |
+| M08 | 設定 | 上から下へスクロールし、プルダウンとスイッチを操作 | 1画面のまま値が保存され、ステータスバー・ナビゲーションバーと重ならない |
 | M09 | 日本語QWERTY | i␣Enter のあと前の文をタップしてから want␣ | タップした所の前の語を書き換えない |
 | M10 | 日本語QWERTY | 変換中に入力欄の別の所をタップ | 出ていた文字のまま確定し、続けて打つと新しい位置に入る |
 | M11 | 設定 | ライブ変換をOFFにして、キーボードを閉じずに打つ | 次のキーから漢字にならない |
