@@ -16,6 +16,7 @@ import android.view.WindowInsets
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Checkable
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.ScrollView
@@ -81,6 +82,29 @@ object AppChrome {
             } else colors.card, 14)
             setTextColor(if (filled) Color.WHITE else if (destructive) colors.danger else colors.text)
             setPadding(dp(context, 16), dp(context, 8), dp(context, 16), dp(context, 8))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onClick() }
+        }
+
+    /** A Material Symbols icon ([resource]) tinted with [color]. Decorative unless it gets a description. */
+    fun icon(context: Context, resource: Int, color: Int = colors(context).secondary): ImageView =
+        ImageView(context).apply {
+            setImageResource(resource)
+            imageTintList = android.content.res.ColorStateList.valueOf(color)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+
+    /** A round button with a Material Symbols icon, such as Back (arrow_back). [description] is read aloud. */
+    fun iconButton(context: Context, resource: Int, description: String, onClick: () -> Unit): ImageView =
+        icon(context, resource, colors(context).text).apply {
+            background = GradientDrawable().apply {
+                setColor(colors(context).card)
+                shape = GradientDrawable.OVAL
+            }
+            contentDescription = description
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
             isClickable = true
             isFocusable = true
             setOnClickListener { onClick() }
@@ -213,11 +237,17 @@ class AppDropdown(
         }
         labels.forEachIndexed { index, label ->
             val chosen = index == selected
-            list.addView(AppChrome.text(context, label, 15f, strong = chosen).apply {
-                if (chosen) setTextColor(colors.accent)
+            list.addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
-                minHeight = dp(ROW_DP)
-                setPadding(dp(18), 0, dp(18), 0)
+                setPadding(dp(18), 0, dp(14), 0)
+                addView(AppChrome.text(context, label, 15f, strong = chosen).apply {
+                    if (chosen) setTextColor(colors.accent)
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+                // The current choice is marked with Material Symbols "check".
+                if (chosen) addView(AppChrome.icon(context, R.drawable.ms_check, colors.accent),
+                    LinearLayout.LayoutParams(dp(22), dp(22)))
+                contentDescription = label
                 isClickable = true
                 isFocusable = true
                 isSelected = chosen

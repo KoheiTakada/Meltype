@@ -26,7 +26,7 @@ class LicensesActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(20), dp(7), dp(20), dp(10))
-            addView(AppChrome.action(this@LicensesActivity, "‹", filled = false) {
+            addView(AppChrome.iconButton(this@LicensesActivity, R.drawable.ms_arrow_back, "戻る") {
                 finish()
             }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(12) })
             addView(AppChrome.text(this@LicensesActivity, "ライセンス", 20f, strong = true))

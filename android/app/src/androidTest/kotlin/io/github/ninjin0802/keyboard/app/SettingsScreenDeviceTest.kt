@@ -295,7 +295,7 @@ class SettingsScreenDeviceTest {
                 assertNotNull(findText(root, "メールアドレス"))
                 assertNotNull(findText(root, "電話番号"))
                 assertNotNull(findText(root, "住所"))
-                val addEmail = findText(root, "＋ メールアドレスを登録")
+                val addEmail = findText(root, "メールアドレスを登録")
                 assertNotNull(addEmail)
                 ((addEmail!!.parent as View).parent as View).performClick()
             }

@@ -10,6 +10,7 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import io.github.ninjin0802.keyboard.app.AppChrome
+import io.github.ninjin0802.keyboard.app.R
 
 /** Inline Meltype editing surface, with no system modal or default Android button chrome. */
 class ClipboardEditorActivity : Activity() {
@@ -30,7 +31,7 @@ class ClipboardEditorActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(20), dp(10), dp(20), dp(12))
-            addView(AppChrome.action(this@ClipboardEditorActivity, "‹", filled = false) {
+            addView(AppChrome.iconButton(this@ClipboardEditorActivity, R.drawable.ms_arrow_back, "戻る") {
                 finish()
             }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(15) })
             addView(AppChrome.text(this@ClipboardEditorActivity, "クリップボードを編集",

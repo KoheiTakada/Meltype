@@ -31,7 +31,7 @@
 
 - 名前: Material Symbols（Google のアイコン。Outlined、太さ 400）
 - 入手元: https://github.com/google/material-design-icons （npm の `@material-symbols/svg-400` 0.49.0 の SVG）
-- 使っているもの: `app/src/main/res/drawable/ms_*.xml`（使うアイコンだけを SVG から Android の VectorDrawable に形を変えたもの。各ファイルの先頭にアイコンの名前を書いてある）。設定画面の操作の印に使う。
+- 使っているもの: `app/src/main/res/drawable/ms_*.xml`（使うアイコンだけを SVG から Android の VectorDrawable に形を変えたもの。各ファイルの先頭にアイコンの名前を書いてある）。設定画面の操作の印と、個人版のクリップボードまわりのアイコンに使う。
 - ライセンス: Apache License 2.0（https://www.apache.org/licenses/LICENSE-2.0）
 - 著作権表示: Copyright 2022 Google LLC
 - ライセンスの全文:

@@ -281,7 +281,7 @@ class MainActivity : Activity() {
     private fun LinearLayout.entry(
         title: String, detail: String? = null,
         checked: Boolean? = null, onToggle: ((Boolean) -> Unit)? = null,
-        value: String? = null, action: ((View) -> Unit)? = null,
+        value: String? = null, leading: Int? = null, action: ((View) -> Unit)? = null,
     ) {
         val row = LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -289,6 +289,9 @@ class MainActivity : Activity() {
             setPadding(dp(18), dp(10), dp(14), dp(10))
             minimumHeight = dp(if (detail == null) 60 else 76)
         }
+        // Only rows that add something have an icon in front (Material Symbols "add").
+        if (leading != null) row.addView(AppChrome.icon(this@MainActivity, leading, AppChrome.colors(this@MainActivity).accent),
+            LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(14) })
         val labels = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
         labels.addView(text(title, 16f, strong = true))
         if (detail != null) labels.addView(text(detail, 13f, muted = true),
@@ -395,18 +398,7 @@ class MainActivity : Activity() {
             minimumHeight = dp(56)
         }
         if (page != Page.HOME) {
-            val back = text("‹", 31f).apply {
-                gravity = Gravity.CENTER
-                contentDescription = "戻る"
-                background = GradientDrawable().apply {
-                    setColor(theme.card)
-                    shape = GradientDrawable.OVAL
-                }
-                setOnClickListener { navigateBack() }
-                isFocusable = true
-                isClickable = true
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-            }
+            val back = AppChrome.iconButton(this, R.drawable.ms_arrow_back, "戻る") { navigateBack() }
             top.addView(back, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
                 marginEnd = dp(16)
             })
@@ -568,7 +560,7 @@ class MainActivity : Activity() {
         title(content, "ユーザー辞書")
         hint(content, "読みを入力すると、登録した単語を変換候補に表示します。")
         card(content) {
-            entry("＋ 単語を登録", "読み・単語を設定") {
+            entry("単語を登録", "読み・単語を設定", leading = R.drawable.ms_add) {
                 editingWord = null
                 navigate(Page.WORD_EDIT)
             }
@@ -600,7 +592,7 @@ class MainActivity : Activity() {
             Triple("address", "住所", "住所を登録")
         )) {
             card(content, heading) {
-                entry("＋ " + prompt, "タップして登録") {
+                entry(prompt, "タップして登録", leading = R.drawable.ms_add) {
                     personalKind = kind
                     editingWord = null
                     navigate(Page.PERSONAL_EDIT)
