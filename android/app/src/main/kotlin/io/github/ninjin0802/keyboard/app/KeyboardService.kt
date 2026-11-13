@@ -217,6 +217,25 @@ class KeyboardService : InputMethodService(), KeyListener {
         }
     }
 
+    /**
+     * After the editor restarted the input, shows the Core's composing text in it again: marks it as
+     * composing where the editor kept it right before the caret, or types it again where the editor
+     * dropped it. Either way the next key continues the same composition.
+     */
+    private fun showCompositionAgain() {
+        val shown = coreInput.shown
+        val input = currentInputConnection ?: return
+        val kept = selStart == selEnd && selStart >= shown.length &&
+            input.getTextBeforeCursor(shown.length, 0)?.toString() == shown
+        if (kept) {
+            input.setComposingRegion(selStart - shown.length, selStart)
+        } else {
+            input.setComposingText(shown, 1)
+            caretWatch.replaced(0, shown.length)
+        }
+        candidateBar?.show(coreInput.candidates, coreInput.selected)
+    }
+
     /** Inserts a character the Core passed on (did not consume), as the app would for a hardware key. */
     private fun insertPassed(text: String) {
         insert(text)
@@ -566,13 +585,19 @@ class KeyboardService : InputMethodService(), KeyListener {
         inputStartsForSmokeTest++
         // Also refresh this on every editor focus, not only layout changes.
         keyboardView?.hapticEnabled = Settings(this).hapticEnabled
-        // 同じ入力欄のまま始め直されることがある（アプリが作り直されない画面の回転など）。そのとき入力欄には
-        // 未確定文字が残っていて、何もしないと次の1文字がそれを置き換えて消してしまう。先に確定させる。
-        // 新しい入力欄では、何も書き込まない。
-        currentInputConnection?.finishComposingText()
-        dropComposition()
-        // Restarted in the same editor without finishing it: the editor kept the composing text.
-        if (coreInput.composing) leaveCore(focusLeft = false)
+        // The same editor restarted the input while the Core is composing (Chrome does this right after
+        // the first character in many web forms): the composition goes on. The Core keeps what is being
+        // typed; the editor may have kept the composing text or dropped it, and gets it shown again.
+        val keepComposing = restarting && coreInput.composing && core != null && coreInField
+        if (!keepComposing) {
+            // 同じ入力欄のまま始め直されることがある（アプリが作り直されない画面の回転など）。そのとき入力欄には
+            // 未確定文字が残っていて、何もしないと次の1文字がそれを置き換えて消してしまう。先に確定させる。
+            // 新しい入力欄では、何も書き込まない。
+            currentInputConnection?.finishComposingText()
+            dropComposition()
+            // Restarted in the same editor without finishing it: the editor kept the composing text.
+            if (coreInput.composing) leaveCore(focusLeft = false)
+        }
         policy = fieldPolicy(info.inputType, info.imeOptions)
         imeOptions = info.imeOptions
         fieldTraits = buildList {
@@ -584,7 +609,11 @@ class KeyboardService : InputMethodService(), KeyListener {
         selStart = info.initialSelStart
         selEnd = info.initialSelEnd
         caretWatch.reset(selStart, selEnd)
-        core?.let { instance -> coreSend(instance, ImeJson.focusEntered(fieldFacts()), moved = true) }
+        if (keepComposing) {
+            showCompositionAgain()
+        } else {
+            core?.let { instance -> coreSend(instance, ImeJson.focusEntered(fieldFacts()), moved = true) }
+        }
         coreInField = true
         val settings = Settings(this)
         session.config = SessionConfig(
