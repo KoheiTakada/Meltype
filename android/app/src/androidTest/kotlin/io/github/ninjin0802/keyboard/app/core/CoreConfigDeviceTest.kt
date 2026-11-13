@@ -22,7 +22,8 @@ class CoreConfigDeviceTest {
     private val broken = File(DeviceTestCore.directory, "config.json.broken")
 
     /** The Core's default of each item a test sets (Meltype.Core Settings). */
-    private val defaults = mapOf(CoreConfig.LIVE_CONVERSION to true, "CursorIntoBrackets" to false)
+    private val defaults = mapOf(CoreConfig.LIVE_CONVERSION to true, "CursorIntoBrackets" to false,
+        CoreConfig.SPACE_WIDTH to CoreConfig.SPACE_STANDARD)
     private val changed = mutableSetOf<String>()
 
     @After fun restore() {
@@ -74,6 +75,20 @@ class CoreConfigDeviceTest {
         type(editor, adapter, "[]\n")
         assertEquals("「」", editor.content)
         assertEquals("The caret goes back inside the brackets (moveCaretBack)", 1, editor.caret)
+        assertFalse("The Core could not read config.json", broken.exists())
+    }
+
+    /** Android sends Space to the Core also while nothing is being typed: SpaceWidth decides the space. */
+    @Test fun spaceWidthDecidesTheSpaceWhileNothingIsTyped() {
+        val editor = TestEditor()
+        val adapter = CoreInputAdapter { editor }
+        set(CoreConfig.SPACE_WIDTH, CoreConfig.SPACE_STANDARD)
+        type(editor, adapter, "ka\n ")
+        assertEquals("Standard (the default): the Core passes Space, a half-width space", "か ", editor.content)
+        set(CoreConfig.SPACE_WIDTH, CoreConfig.SPACE_FULL_WIDTH)
+        type(editor, adapter, " ")
+        assertEquals("FullWidth: the Core types a full-width space", "か 　", editor.content)
+        assertEquals(CoreConfig.SPACE_FULL_WIDTH, config.string(CoreConfig.SPACE_WIDTH))
         assertFalse("The Core could not read config.json", broken.exists())
     }
 

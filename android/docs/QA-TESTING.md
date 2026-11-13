@@ -53,6 +53,10 @@ Mozcの初回ソースビルドは大量の依存を取得する。版・SHAを�
 | A14 | malformedResponseLeavesTheEditorAlone | 項目の欠けたCoreの応答 | 例外になり、入力欄は書き換えない |
 | A15 | removeBeforeReplacesTheTextBeforeTheCaret | removeBefore=今日は、text=京は | キャレットの前を消してから入れる |
 | A16 | composingTextIsNotSentAsTextBeforeTheCaret | 「abc 」のあとにari | field.before に変換中の文字を含めない |
+| A17 | symbolsAfterJapaneseAreFullWidth | sorena! / nande? / ? | それな！ / なんで？ / ？（記号の幅はCoreが決める。Macと同じ） |
+| A18 | symbolsAfterEnglishStayAsTyped | let's go! / taro@example.com | let's go! / taro@example.com（英語の後ろ・メールアドレスは打ったまま） |
+| A19 | freshSettingsDefaultToRomajiHalfWidthAndNoEmoji | 設定が何もない状態 | ローマ字配列・スペース半角・絵文字OFF。全角にすると config.json の SpaceWidth が FullWidth |
+| A20 | earlierFullWidthSpaceMovesToTheCore | 前の版の設定（日本語スペース全角）だけがある | キーボードの起動時に config.json の SpaceWidth=FullWidth に移し、前の設定を消す |
 | B01 | homeHasGboardStyleCategoriesWithoutDemoOrCompletedSteps | 設定ホームを開く | 4カテゴリがあり試し書き等がない |
 | B02 | liveConversionSwitchChangesAndPersistsItsValue | ライブ変換を切替 | 表示値と保存値が一致し、Core の config.json の LiveConversion に書かれる |
 | B03 | systemBarsAreRespectedOnHomeAndDetailScreens | 実Insets・合成Insetsを設定 | 上端/下端のシステムUIと非重複 |
@@ -76,13 +80,17 @@ Mozcの初回ソースビルドは大量の依存を取得する。版・SHAを�
 | D03 | settingOneItemKeepsTheRestOfTheFile | 項目の多い config.json の1項目を変える | ほかの項目・順序はそのまま。一時ファイルを残さない |
 | D04 | aFileThatCannotBeReadIsLeftAlone | 壊れた config.json | 書かずに失敗を返し、ファイルはそのまま |
 | D05 | aNewFileNamesTheSchemaAndTheVersion | config.json がない | $schema と SettingsVersion（schema の既定）を書く |
+| D06 | spaceWidthDecidesTheSpaceWhileNothingIsTyped | SpaceWidth を Standard→FullWidth、ka Enter のあと Space | Standard はCoreが通して半角、FullWidth はCoreが全角の空白を入れる |
 | E01 | selectedKeyboardOpensAndTypesThroughOnscreenTouch | 選んだキーボードで asd、日本語欄で a | asd、日本語は Native Core を通る |
 | E02 | caretMovesByTheAppStopRecommit | 日本語欄で i␣Enter のあとアプリがキャレットを先頭へ動かし末尾へ戻して want␣ | 前の語を確定し直さない |
 | E03 | leavingAnEditorCommitsTheCompositionThere | 日本語欄で ka → 別の欄 → 戻って a Enter | 日本語欄の か は確定され、かあ になる |
 | E04 | ownEditorWritesDoNotLookLikeCaretMoves | 日本語欄で i␣Enter→want␣、キャレットを外から動かさない | I に確定し直し、キーボード自身の編集は外からの移動と数えない |
 | E05 | candidateTapsFixAConversionClauseByClause | 日本語欄で watashinonamaehanakanodesu␣（実際のMozcで変換）→各文節で、いまと違う候補を候補バーでタップ | 最後の文節まで確定せず、タップのたびに次の文節へ進む。最後のタップで選んだとおりの全文を確定 |
+| E06 | symbolsAfterJapaneseAreTheCoresFullWidth | 日本語欄で sorena →記号の配列の ! と ? → Enter | 記号も未確定文字に入り、確定すると末尾が ！？（半角の ! ? はない） |
+| E07 | symbolsInAnEmailFieldStayHalfWidth | メールアドレス欄（英字QWERTY）で記号の配列の ? と ! | ?!（打ったまま） |
+| E08 | spaceIsTheCoresSpaceWidth | 日本語欄で ka Enter → Space、SpaceWidth を FullWidth にして Space | 「か 」→「か 　」 |
 
-A04〜A06、A14〜A15、C03〜C04はCoreの応答の形（ImeOutput）の固定JSONで検証する。A01〜A03、A08〜A09、A12、A16、C01〜C02、C05、C08〜C13、D01〜D02はNative Coreとの接続を含む（C09〜C12の変換は試験用の変換器で、文節の区切りと候補を固定する）。E01〜E05は端末で選んだキーボードの画面のキーを押して確かめる。実機での画面開閉は自動計測とは別の手動テストである。
+A04〜A06、A14〜A15、C03〜C04はCoreの応答の形（ImeOutput）の固定JSONで検証する。A01〜A03、A08〜A09、A12、A16〜A18、C01〜C02、C05、C08〜C13、D01〜D02、D06はNative Coreとの接続を含む（C09〜C12の変換は試験用の変換器で、文節の区切りと候補を固定する）。E01〜E08は端末で選んだキーボードの画面のキーを押して確かめる。実機での画面開閉は自動計測とは別の手動テストである。
 
 ## 3. 画面開閉・実機での手動テスト
 実機名、Androidバージョン、ビルドソースSHA、日付、画面サイズ、実際に入力された文字列、スクリーンショットや失敗手順をPRに記録。**試していないケースを合格としない。**

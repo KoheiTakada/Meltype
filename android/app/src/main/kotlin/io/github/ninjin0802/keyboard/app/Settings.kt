@@ -35,10 +35,40 @@ class Settings(private val context: Context) {
         get() = englishOf(prefs.getString(KEY_ENGLISH_LAYOUT, null))
         set(value) { prefs.edit().putString(KEY_ENGLISH_LAYOUT, savedName(value)).apply() }
 
-    /** Japanese layout only. The default is a half-width space. */
+    /**
+     * 日本語入力のときの空白キーが全角か（Core の設定 SpaceWidth が FullWidth。config.json に書く）。
+     * 日本語 QWERTY では Core がこの設定で決め、12キーのかなもこれに合わせる。最初は半角（Core の既定 Standard）。
+     * 前の版で SharedPreferences に残した値は、config.json に移す。
+     */
     var japaneseSpaceFullWidth: Boolean
-        get() = prefs.getBoolean(KEY_JAPANESE_SPACE_FULL_WIDTH, false)
-        set(value) { prefs.edit().putBoolean(KEY_JAPANESE_SPACE_FULL_WIDTH, value).apply() }
+        get() = core.string(CoreConfig.SPACE_WIDTH)?.let { it == CoreConfig.SPACE_FULL_WIDTH }
+            ?: movedSpaceWidth() ?: false
+        set(value) {
+            // 半角に戻すときは既定 (Standard) にする。Android の画面で選べない HalfWidth はそのまま残す。
+            val current: String? = core.string(CoreConfig.SPACE_WIDTH)
+            val next: String = when {
+                value -> CoreConfig.SPACE_FULL_WIDTH
+                current == CoreConfig.SPACE_FULL_WIDTH -> CoreConfig.SPACE_STANDARD
+                else -> current ?: CoreConfig.SPACE_STANDARD
+            }
+            if (core.set(CoreConfig.SPACE_WIDTH, next)) prefs.edit().remove(KEY_JAPANESE_SPACE_FULL_WIDTH).apply()
+        }
+
+    /**
+     * 前の版が SharedPreferences に保存した空白の幅を、まだなら config.json に移す。日本語 QWERTY では
+     * Core が config.json だけを読むので、キーボードが Core を開く前に呼ぶ（設定画面を開かなくても効くように）。
+     */
+    fun moveSpaceWidthToCore() {
+        if (core.string(CoreConfig.SPACE_WIDTH) == null) movedSpaceWidth()
+    }
+
+    /** 前の版が SharedPreferences に保存した空白の幅を config.json に移して返す。保存がなければ null。 */
+    private fun movedSpaceWidth(): Boolean? {
+        if (!prefs.contains(KEY_JAPANESE_SPACE_FULL_WIDTH)) return null
+        val saved = prefs.getBoolean(KEY_JAPANESE_SPACE_FULL_WIDTH, false)
+        japaneseSpaceFullWidth = saved
+        return saved
+    }
 
     /** Hides emoji keys/panel and suppresses emoji suggestions when disabled. */
     var emojiEnabled: Boolean
@@ -76,6 +106,7 @@ class Settings(private val context: Context) {
 
     companion object {
         const val KEY_JAPANESE_LAYOUT = "japanese_layout"
+        /** 前の版が日本語入力の空白の幅を保存していた名前（今は config.json の SpaceWidth）。 */
         const val KEY_JAPANESE_SPACE_FULL_WIDTH = "japanese_space_full_width"
         const val KEY_EMOJI_ENABLED = "emoji_enabled"
         const val KEY_HAPTIC_ENABLED = "haptic_enabled"
