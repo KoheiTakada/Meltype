@@ -39,7 +39,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download --repo "$GITHUB_REPOSITORY" --pattern 'Meltype-*-linux.zip' --dir "$RUNNER_TEMP/release"
+          # The personal fork publishes Android APKs, not the desktop Mozc helper.
+          # Use the canonical public Meltype release for Core input expectations.
+          gh release download --repo "yksr-melt/Meltype" --pattern 'Meltype-*-linux.zip' --dir "$RUNNER_TEMP/release"
           unzip -q "$RUNNER_TEMP"/release/*.zip -d "$RUNNER_TEMP/release"
           helper="$RUNNER_TEMP/release/Meltype-linux/mozc/meltype_mozc_helper"
           chmod +x "$helper"
