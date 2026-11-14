@@ -256,6 +256,26 @@ class KeyboardService : InputMethodService(), KeyListener {
         candidateBar?.show(coreInput.candidates, coreInput.selected)
     }
 
+    /**
+     * An external Send button may clear this editor without moving focus.
+     * The app deleted the displayed composition, so notify the Core without
+     * generating a second commit or restoring the old text.
+     */
+    private fun forgetCompositionIfEditorWasCleared(): Boolean {
+        if (!coreInput.composing || !fieldReadable) return false
+        val input = currentInputConnection ?: return false
+        if (input.getTextBeforeCursor(1, 0)?.isEmpty() != true ||
+            input.getTextAfterCursor(1, 0)?.isEmpty() != true) return false
+        personalKeys.clear()
+        personalInputStarted = false
+        unconfirmed = ""
+        leaveCore(focusLeft = false, field = true)
+        dropComposition()
+        caretWatch.reset(selStart, selEnd)
+        refreshInlineSuggestion()
+        return true
+    }
+
     /** Inserts a character the Core passed on (did not consume), as the app would for a hardware key. */
     private fun insertPassed(text: String) {
         insert(text)
@@ -970,6 +990,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         val identity = FieldIdentity(info.packageName, info.fieldId, info.inputType, info.imeOptions)
         val keepSelectedLanguage = restarting && info.fieldId != View.NO_ID && identity == lastFieldIdentity
         super.onStartInputView(info, restarting)
+        forgetCompositionIfEditorWasCleared()
         inputStartsForSmokeTest++
         // Also refresh this on every editor focus, not only layout changes.
         keyboardView?.hapticEnabled = Settings(this).hapticEnabled
@@ -1060,6 +1081,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         selStart = newSelStart
         selEnd = newSelEnd
+        if (forgetCompositionIfEditorWasCleared()) return
         // Core の書き換えでないキャレットの移動は、Core に知らせる（変換中なら、出ている文字のまま確定させる）。
         if (!caretWatch.isOwn(newSelStart, newSelEnd, candidatesEnd, coreInput.composing)) {
             if (!ownDirectInput) {
@@ -1079,6 +1101,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onKey(action: KeyAction, direction: Direction, timeMs: Long) {
+        forgetCompositionIfEditorWasCleared()
         // 1つのキーで確定と入力の両方が起きることがある。入力欄には、まとめて1回の操作として届ける。
         val connection = currentInputConnection
         smokeKeyLog = (smokeKeyLog + " | " + action.javaClass.simpleName + "@" + editorForSmokeTest()).takeLast(600)
