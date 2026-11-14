@@ -68,27 +68,55 @@ class ImeLaunchDeviceTest {
         }
     }
 
+    private fun keysOnScreen(keys: io.github.ninjin0802.keyboard.app.view.KeyboardView?): String {
+        if (keys == null) return ""
+        val at = IntArray(2)
+        keys.getLocationOnScreen(at)
+        return "@" + at[0] + "," + at[1]
+    }
+
     private fun describeImeState(activity: ImeSmokeActivity): String {
         val service = KeyboardService.activeForSmokeTest?.get()
         val keys = service?.activeKeysForSmokeTest()
         val defaultIme = Settings.Secure.getString(
             target.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
         val size = if (keys == null) "none" else keys.width.toString() + "x" + keys.height
+        val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+            as InputMethodManager
         return "(windowFocus=" + activity.hasWindowFocus() +
             ", editorFocus=" + activity.editor.hasFocus() +
+            ", editorImeActive=" + imm.isActive(activity.editor) +
             ", defaultIme=" + defaultIme +
             ", serviceCreated=" + (service != null) +
             ", inputViewShown=" + service?.isInputViewShown +
-            ", keys=" + size + ")"
+            ", keys=" + size + keysOnScreen(keys) + " " + keys?.layout?.id +
+            ", editor=" + service?.editorForSmokeTest() +
+            ", touches=[" + keys?.touchLogForSmokeTest + "]" +
+            ", handled=[" + service?.smokeKeyLog + "])"
+    }
+
+    /** A visible view alone can belong to the previous editor during a window transition. */
+    private fun isImeReadyFor(
+        activity: ImeSmokeActivity,
+        editor: android.widget.EditText,
+        expectedLayout: io.github.ninjin0802.keyboard.app.layout.LayoutId,
+    ): Boolean {
+        val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+            as InputMethodManager
+        val service = KeyboardService.activeForSmokeTest?.get()
+        val keys = service?.activeKeysForSmokeTest()
+        return activity.hasWindowFocus() && editor.hasFocus() &&
+            imm.isActive(editor) && service?.isInputViewShown == true &&
+            keys != null && keys.layout.id == expectedLayout &&
+            keys.isAttachedToWindow && keys.isShown && keys.width > 100 && keys.height > 100
     }
 
     /** Touches the on-screen key that [matches], as a finger would. */
     private fun tap(keyboard: io.github.ninjin0802.keyboard.app.view.KeyboardView, label: String, matches: (KeyAction) -> Boolean) {
         val key = keyboard.layout.keys.firstOrNull { matches(it.action) } ?: throw AssertionError("No on-screen key for $label")
-        val location = IntArray(2)
-        instrumentation.runOnMainSync { keyboard.getLocationOnScreen(location) }
-        val x = location[0] + keyboard.width * ((key.col + key.width / 2f) / keyboard.layout.columns)
-        val y = location[1] + keyboard.height * ((key.row + 0.5f) / keyboard.layout.rows)
+        var center = 0f to 0f
+        instrumentation.runOnMainSync { center = keyboard.keyCenterOnScreenForSmokeTest(key) }
+        val (x, y) = center
         val clock = SystemClock.uptimeMillis()
         val down = MotionEvent.obtain(clock, clock, MotionEvent.ACTION_DOWN, x, y, 0)
         val up = MotionEvent.obtain(clock, clock + 55, MotionEvent.ACTION_UP, x, y, 0)
@@ -137,9 +165,8 @@ class ImeLaunchDeviceTest {
             retry = { requestKeyboard(activity, editor) },
             describe = { describeImeState(activity) },
         ) {
-            editor.hasFocus() &&
-                KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()?.layout?.id ==
-                    io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI
+            isImeReadyFor(activity, editor,
+                io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI)
         }
     }
 
@@ -296,6 +323,158 @@ class ImeLaunchDeviceTest {
         }
     }
 
+    private fun shownKeys(): io.github.ninjin0802.keyboard.app.view.KeyboardView =
+        KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest() ?: throw AssertionError("Keys not shown")
+
+    /** Opens the first symbol page with ?123, types [symbol] there and goes back to the letters. */
+    private fun typeFromSymbols(symbol: String) {
+        val letters = shownKeys().layout.id
+        tap(shownKeys(), "?123") { it == KeyAction.Switch(io.github.ninjin0802.keyboard.app.layout.LayoutId.SYMBOLS) }
+        waitUntil("the symbol page is shown") {
+            shownKeys().layout.id == io.github.ninjin0802.keyboard.app.layout.LayoutId.SYMBOLS
+        }
+        tap(shownKeys(), symbol) { it == KeyAction.Text(symbol) }
+        tap(shownKeys(), "back to the letters") { it == KeyAction.Back }
+        waitUntil("the letters are shown again") { shownKeys().layout.id == letters }
+    }
+
+    private fun composingStart(editor: android.widget.EditText) =
+        android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)
+
+    /**
+     * Japanese QWERTY sends the symbols of the symbol page to the Core as typed characters, and the
+     * Core decides their width, as on the Mac: ! and ? after Japanese are full-width.
+     */
+    @Test fun symbolsAfterJapaneseAreTheCoresFullWidth() = withRomajiActivity { activity ->
+        val editor = activity.japaneseEditor
+        focusJapanese(activity, editor)
+        clear(editor)
+        focusJapanese(activity, editor)
+        typeRomaji("sorena")
+        typeFromSymbols("!")
+        typeFromSymbols("?")
+        assertTrue("The symbols are part of what is being typed: " + editor.text, composingStart(editor) >= 0)
+        typeRomaji("\n")
+        waitUntil("the sentence is committed", describe = { "text=" + editor.text }) {
+            editor.text.isNotEmpty() && composingStart(editor) < 0
+        }
+        val text = editor.text.toString()
+        assertTrue("! and ? after Japanese are full-width: $text", text.endsWith("！？"))
+        assertTrue("No half-width ! or ?: $text", '!' !in text && '?' !in text)
+    }
+
+    /** The reverse: where the Core is not used (an email field, English QWERTY), ? and ! stay as typed. */
+    @Test fun symbolsInAnEmailFieldStayHalfWidth() = withRomajiActivity { activity ->
+        val editor = activity.editor
+        fun focusEnglish() {
+            requestKeyboard(activity, editor)
+            waitUntil("English QWERTY keyboard for the email field", millis = 45_000, retryEveryMillis = 2_000,
+                retry = { requestKeyboard(activity, editor) }, describe = { describeImeState(activity) }) {
+                editor.hasFocus() && KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()?.layout?.id ==
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY
+            }
+        }
+        focusEnglish()
+        clear(editor)
+        focusEnglish()
+        typeFromSymbols("?")
+        typeFromSymbols("!")
+        waitUntil("? and ! are typed as they are", describe = { "text=" + editor.text }) {
+            editor.text.toString() == "?!"
+        }
+    }
+
+    /**
+     * Space in Japanese QWERTY goes to the Core also when nothing is being typed, so the Core's
+     * SpaceWidth decides it: half-width by default, full-width when chosen in the settings.
+     */
+    @Test fun spaceIsTheCoresSpaceWidth() = withRomajiActivity { activity ->
+        val config = io.github.ninjin0802.keyboard.app.core.CoreConfig(
+            io.github.ninjin0802.keyboard.app.core.coreDataDirectory(target))
+        val previous = config.string(io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_WIDTH)
+        fun spaceWidth(value: String) {
+            assertTrue(config.set(io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_WIDTH, value))
+            // The Core reads config.json again within a second (SettingsFile).
+            Thread.sleep(1_300)
+        }
+        try {
+            spaceWidth(io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_STANDARD)
+            val editor = activity.japaneseEditor
+            focusJapanese(activity, editor)
+            clear(editor)
+            focusJapanese(activity, editor)
+            typeRomaji("ka\n")
+            waitUntil("か is committed", describe = { "text=" + editor.text }) {
+                editor.text.toString() == "か" && composingStart(editor) < 0
+            }
+            typeRomaji(" ")
+            waitUntil("a half-width space by default", describe = { "text=" + editor.text }) {
+                editor.text.toString() == "か "
+            }
+            spaceWidth(io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_FULL_WIDTH)
+            typeRomaji(" ")
+            waitUntil("a full-width space when chosen", describe = { "text=" + editor.text }) {
+                editor.text.toString() == "か 　"
+            }
+        } finally {
+            config.set(io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_WIDTH,
+                previous ?: io.github.ninjin0802.keyboard.app.core.CoreConfig.SPACE_STANDARD)
+        }
+    }
+
+    /**
+     * The editor restarts after its first VISIBLE character, as a web form can do on text change.
+     * A bare "k" can still be buffered as romaji with no editor text, so it cannot trigger the
+     * editor's TextWatcher and must not be used to arrange this restart.
+     * After typing "a" and restarting, the following "ka" must make あか, not lose the あ.
+     */
+    @Test fun aRestartAfterTheFirstCharacterKeepsWhatIsBeingTyped() = withRomajiActivity { activity ->
+        val editor = activity.restartingEditor
+        focusJapanese(activity, editor)
+        val starts = KeyboardService.activeForSmokeTest?.get()?.inputStartsForSmokeTest ?: 0
+        typeRomaji("a")
+        // Wait for the actual app-triggered restart, not only for a visible keyboard.
+        waitUntil("the editor restarted the input after the first visible character",
+            describe = { "text=" + editor.text + " restarts=" + activity.restarts + " " + describeImeState(activity) }) {
+            activity.restarts == 1 && (KeyboardService.activeForSmokeTest?.get()?.inputStartsForSmokeTest ?: 0) > starts
+        }
+        focusJapanese(activity, editor)
+        typeRomaji("ka\n")
+        waitUntil("aka is あか", describe = { "text=" + editor.text + " " + describeImeState(activity) }) {
+            editor.text.toString() == "あか" && composingStart(editor) < 0
+        }
+    }
+
+    /** Focuses the email field and waits until the English QWERTY keyboard writes to it. */
+    private fun focusEmail(activity: ImeSmokeActivity) {
+        requestKeyboard(activity, activity.editor)
+        waitUntil("the email field owns the English QWERTY keyboard", millis = 45_000, retryEveryMillis = 2_000,
+            retry = { requestKeyboard(activity, activity.editor) }, describe = { describeImeState(activity) }) {
+            isImeReadyFor(activity, activity.editor, io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY)
+        }
+    }
+
+    /**
+     * A key typed while the editor is restarting the input (Chrome restarts it when a web form field
+     * gets focus) reaches the editor's old, closed connection. It must still be typed: a, not nothing.
+     */
+    @Test fun aKeyTypedWhileTheEditorRestartsTheInputIsNotLost() = withRomajiActivity { activity ->
+        val editor = activity.editor
+        focusEmail(activity)
+        clear(editor)
+        focusEmail(activity)
+        val keyboard = shownKeys()
+        val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        // Restart and type at once, before the restart reaches the keyboard.
+        instrumentation.runOnMainSync { imm.restartInput(editor) }
+        tap(keyboard, "a") { (it as? KeyAction.Text)?.text == "a" }
+        focusEmail(activity)
+        tap(shownKeys(), "s") { (it as? KeyAction.Text)?.text == "s" }
+        waitUntil("both keys are typed", describe = { "text=" + editor.text + " " + describeImeState(activity) }) {
+            editor.text.toString() == "as"
+        }
+    }
+
     @Test fun selectedKeyboardOpensAndTypesThroughOnscreenTouch() {
         val expectedIme = target.packageName + "/" + KeyboardService::class.java.name
         assertEquals("The actual keyboard must be the system-selected default",
@@ -310,56 +489,43 @@ class ImeLaunchDeviceTest {
             Intent(target, ImeSmokeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         ) as ImeSmokeActivity
         try {
+            // The old test accepted a visible keyboard left over from the
+            // previous activity. Wait until Android binds this specific EditText.
             requestKeyboard(activity, activity.editor)
             waitUntil(
-                "IME service and the input window shown",
+                "the email editor owns the visible English IME",
                 millis = 45_000,
                 retryEveryMillis = 2_000,
                 retry = { requestKeyboard(activity, activity.editor) },
                 describe = { describeImeState(activity) },
             ) {
-                val service = KeyboardService.activeForSmokeTest?.get()
-                service?.activeKeysForSmokeTest()?.let {
-                    it.isAttachedToWindow && it.isShown && it.width > 100 && it.height > 100
-                } == true
+                isImeReadyFor(activity, activity.editor,
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY)
             }
-            val service = KeyboardService.activeForSmokeTest?.get()
-            assertNotNull("Meltype was not instantiated by the Android IME manager", service)
-            val view = service!!.activeKeysForSmokeTest()
-            assertNotNull("Meltype key surface was not displayed", view)
-            val keyboard = view!!
-            assertEquals("A real email editor should select the English QWERTY keyboard",
-                io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY, keyboard.layout.id)
 
-            for (letter in listOf("a", "s", "d")) {
-                val key = keyboard.layout.keys.singleOrNull {
-                    (it.action as? KeyAction.Text)?.text == letter
+            for ((index, letter) in listOf('a', 's', 'd').withIndex()) {
+                // Check ownership before every touch; the IME may detach while
+                // Android switches the focused window between test activities.
+                waitUntil(
+                    "email editor IME ready before key $letter",
+                    retryEveryMillis = 2_000,
+                    retry = { requestKeyboard(activity, activity.editor) },
+                    describe = { describeImeState(activity) },
+                ) {
+                    isImeReadyFor(activity, activity.editor,
+                        io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY)
                 }
-                assertNotNull("No on-screen key for $letter", key)
-                val location = IntArray(2)
-                instrumentation.runOnMainSync { keyboard.getLocationOnScreen(location) }
-                val chosen = key!!
-                val x = location[0] +
-                    keyboard.width * ((chosen.col + chosen.width / 2f) / keyboard.layout.columns)
-                val y = location[1] +
-                    keyboard.height * ((chosen.row + 0.5f) / keyboard.layout.rows)
-                val clock = SystemClock.uptimeMillis()
-                val down = MotionEvent.obtain(clock, clock, MotionEvent.ACTION_DOWN, x, y, 0)
-                val up = MotionEvent.obtain(clock, clock + 55, MotionEvent.ACTION_UP, x, y, 0)
-                down.source = InputDevice.SOURCE_TOUCHSCREEN
-                up.source = InputDevice.SOURCE_TOUCHSCREEN
-                try {
-                    assertTrue("Touch DOWN not delivered to IME", instrumentation.uiAutomation
-                        .injectInputEvent(down, true))
-                    assertTrue("Touch UP not delivered to IME", instrumentation.uiAutomation
-                        .injectInputEvent(up, true))
-                } finally {
-                    down.recycle()
-                    up.recycle()
+                val keyboard = KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()
+                    ?: throw AssertionError("Keyboard detached before key $letter")
+                tap(keyboard, letter.toString()) {
+                    (it as? KeyAction.Text)?.text == letter.toString()
                 }
-                waitUntil("key $letter must enter the app's EditText") {
-                    activity.editor.text.toString().length >= letter.length +
-                        listOf("a", "s", "d").indexOf(letter)
+                val expected = "asd".substring(0, index + 1)
+                waitUntil(
+                    "key $letter must enter exactly $expected",
+                    describe = { "text=" + activity.editor.text + " " + describeImeState(activity) },
+                ) {
+                    activity.editor.text.toString() == expected
                 }
             }
             waitUntil("the three visible keys must generate text in the editor") {
@@ -369,42 +535,15 @@ class ImeLaunchDeviceTest {
 
             // Also exercise the normal Japanese-input route. A working email
             // keyboard alone could conceal a failing Japanese/native path.
-            instrumentation.runOnMainSync {
-                activity.japaneseEditor.requestFocus()
-                (activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
-                    as InputMethodManager).showSoftInput(
-                        activity.japaneseEditor, InputMethodManager.SHOW_IMPLICIT)
-            }
-            waitUntil("Japanese text field opens the Japanese romaji keyboard") {
-                KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()?.layout?.id ==
-                    io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI
-            }
-            val japanese = KeyboardService.activeForSmokeTest?.get()
-                ?.activeKeysForSmokeTest() ?: throw AssertionError("Japanese keys not shown")
-            val key = japanese.layout.keys.firstOrNull {
-                when (val action = it.action) {
-                    is KeyAction.Romaji -> action.char == 'a'
-                    is KeyAction.Flick -> action.key.chars.firstOrNull() == 'あ'
+            focusJapanese(activity, activity.japaneseEditor)
+            val japanese = KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()
+                ?: throw AssertionError("Japanese keys not shown")
+            tap(japanese, "Japanese A") {
+                when (it) {
+                    is KeyAction.Romaji -> it.char == 'a'
+                    is KeyAction.Flick -> it.key.chars.firstOrNull() == 'あ'
                     else -> false
                 }
-            } ?: throw AssertionError("No Japanese あ/A soft key")
-            val location = IntArray(2)
-            instrumentation.runOnMainSync { japanese.getLocationOnScreen(location) }
-            val x = location[0] +
-                japanese.width * ((key.col + key.width / 2f) / japanese.layout.columns)
-            val y = location[1] +
-                japanese.height * ((key.row + 0.5f) / japanese.layout.rows)
-            val clock = SystemClock.uptimeMillis()
-            val down = MotionEvent.obtain(clock, clock, MotionEvent.ACTION_DOWN, x, y, 0)
-            val up = MotionEvent.obtain(clock, clock + 55, MotionEvent.ACTION_UP, x, y, 0)
-            down.source = InputDevice.SOURCE_TOUCHSCREEN
-            up.source = InputDevice.SOURCE_TOUCHSCREEN
-            try {
-                assertTrue(instrumentation.uiAutomation.injectInputEvent(down, true))
-                assertTrue(instrumentation.uiAutomation.injectInputEvent(up, true))
-            } finally {
-                down.recycle()
-                up.recycle()
             }
             waitUntil("Japanese key must write composing text into the editor") {
                 activity.japaneseEditor.text.isNotEmpty()

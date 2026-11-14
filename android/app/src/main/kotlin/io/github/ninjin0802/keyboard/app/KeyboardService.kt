@@ -217,6 +217,25 @@ class KeyboardService : InputMethodService(), KeyListener {
         }
     }
 
+    /**
+     * After the editor restarted the input, shows the Core's composing text in it again: marks it as
+     * composing where the editor kept it right before the caret, or types it again where the editor
+     * dropped it. Either way the next key continues the same composition.
+     */
+    private fun showCompositionAgain() {
+        val shown = coreInput.shown
+        val input = currentInputConnection ?: return
+        val kept = selStart == selEnd && selStart >= shown.length &&
+            input.getTextBeforeCursor(shown.length, 0)?.toString() == shown
+        if (kept) {
+            input.setComposingRegion(selStart - shown.length, selStart)
+        } else {
+            input.setComposingText(shown, 1)
+            caretWatch.replaced(0, shown.length)
+        }
+        candidateBar?.show(coreInput.candidates, coreInput.selected)
+    }
+
     /** Inserts a character the Core passed on (did not consume), as the app would for a hardware key. */
     private fun insertPassed(text: String) {
         insert(text)
@@ -237,6 +256,21 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     /** The Core's last view (smoke test only). */
     internal fun coreViewForSmokeTest(): ImeView? = coreInput.view
+
+    /** How many times an editor started the keyboard, restarts included (smoke test only). */
+    @Volatile internal var inputStartsForSmokeTest = 0
+        private set
+
+    /** The keys handled lately and the editor each went to (smoke test only). */
+    @Volatile internal var smokeKeyLog: String = ""
+        private set
+
+    /** The editor the keyboard writes to now, and the layout shown (smoke test only). */
+    internal fun editorForSmokeTest(): String {
+        val info = currentInputEditorInfo
+        return "layout=" + nav.current + " field=" + (info?.inputType?.let { Integer.toHexString(it) }) +
+            "/" + info?.fieldId + " connection=" + (currentInputConnection != null) + " started=" + coreInField
+    }
 
     /** The candidate bar, to tap a candidate as a finger would (smoke test only). */
     internal fun candidateBarForSmokeTest(): CandidateBarView? = candidateBar
@@ -290,6 +324,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         createdAtNanos = System.nanoTime()
         Settings(this).let {
             nav.choose(it.japaneseLayout, it.englishLayout)
+            it.moveSpaceWidthToCore()
             it.registerChangeListener(settingsListener)
         }
         // 辞書を写すので時間がかかる。変換と同じスレッドの先頭で行うので、変換はこれが終わってから動く。
@@ -547,15 +582,22 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     private fun startNormalInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        inputStartsForSmokeTest++
         // Also refresh this on every editor focus, not only layout changes.
         keyboardView?.hapticEnabled = Settings(this).hapticEnabled
-        // 同じ入力欄のまま始め直されることがある（アプリが作り直されない画面の回転など）。そのとき入力欄には
-        // 未確定文字が残っていて、何もしないと次の1文字がそれを置き換えて消してしまう。先に確定させる。
-        // 新しい入力欄では、何も書き込まない。
-        currentInputConnection?.finishComposingText()
-        dropComposition()
-        // Restarted in the same editor without finishing it: the editor kept the composing text.
-        if (coreInput.composing) leaveCore(focusLeft = false)
+        // The same editor restarted the input while the Core is composing (Chrome does this right after
+        // the first character in many web forms): the composition goes on. The Core keeps what is being
+        // typed; the editor may have kept the composing text or dropped it, and gets it shown again.
+        val keepComposing = restarting && coreInput.composing && core != null && coreInField
+        if (!keepComposing) {
+            // 同じ入力欄のまま始め直されることがある（アプリが作り直されない画面の回転など）。そのとき入力欄には
+            // 未確定文字が残っていて、何もしないと次の1文字がそれを置き換えて消してしまう。先に確定させる。
+            // 新しい入力欄では、何も書き込まない。
+            currentInputConnection?.finishComposingText()
+            dropComposition()
+            // Restarted in the same editor without finishing it: the editor kept the composing text.
+            if (coreInput.composing) leaveCore(focusLeft = false)
+        }
         policy = fieldPolicy(info.inputType, info.imeOptions)
         imeOptions = info.imeOptions
         fieldTraits = buildList {
@@ -567,7 +609,12 @@ class KeyboardService : InputMethodService(), KeyListener {
         selStart = info.initialSelStart
         selEnd = info.initialSelEnd
         caretWatch.reset(selStart, selEnd)
-        core?.let { instance -> coreSend(instance, ImeJson.focusEntered(fieldFacts()), moved = true) }
+        if (restarting) typeLostTextAgain(info) else unconfirmed = ""
+        if (keepComposing) {
+            showCompositionAgain()
+        } else {
+            core?.let { instance -> coreSend(instance, ImeJson.focusEntered(fieldFacts()), moved = true) }
+        }
         coreInField = true
         val settings = Settings(this)
         session.config = SessionConfig(
@@ -614,6 +661,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         selStart = newSelStart
         selEnd = newSelEnd
+        unconfirmed = ""
         if (bridge.onSelectionChanged(newSelStart, newSelEnd, candidatesStart, candidatesEnd)) {
             // 利用者がカーソルを動かした、またはアプリが文章を書き換えた。出ている文字はそのまま確定させる。
             dropComposition()
@@ -639,6 +687,7 @@ class KeyboardService : InputMethodService(), KeyListener {
     override fun onKey(action: KeyAction, direction: Direction, timeMs: Long) {
         // 1つのキーで確定と入力の両方が起きることがある。入力欄には、まとめて1回の操作として届ける。
         val connection = currentInputConnection
+        smokeKeyLog = (smokeKeyLog + " | " + action.javaClass.simpleName + "@" + editorForSmokeTest()).takeLast(600)
         val start = System.nanoTime()
         connection?.beginBatchEdit()
         try {
@@ -663,31 +712,30 @@ class KeyboardService : InputMethodService(), KeyListener {
                 ),
             )
             is KeyAction.Text -> {
-                val punctuation = action.text in setOf("。", "、", "！", "？", "!", "?")
                 val upper = nav.current == LayoutId.QWERTY
                 val typed = if (upper) shift.apply(action.text) else action.text
-                if (punctuation) {
-                    // Only punctuation or the explicit Return key can confirm.
+                // The keys 、 and 。 commit what is being typed and then type themselves.
+                val confirms = action.text in CONFIRMING_PUNCTUATION
+                val native = if (confirms) null else coreForRomaji()
+                if (native != null) {
+                    // Japanese QWERTY and its symbol pages: every other symbol and digit goes to the
+                    // Core as the character typed, as on the Mac. The Core decides what it becomes
+                    // (? and ! full-width after Japanese, as typed after English), not this keyboard.
+                    typed.forEach { ch ->
+                        // Only the character: the Core decides the key from it
+                        // (a virtual key made from '.' would be Delete).
+                        val consumed = coreCharacter(ch.code)
+                        if (!consumed) {
+                            // A deliberately direct key still reaches the
+                            // editor, without a preceding commit of Japanese.
+                            insertPassed(ch.toString())
+                        }
+                    }
+                } else if (confirms || action.text in SENTENCE_END) {
                     commitComposing()
                     insert(typed)
                 } else {
-                    // A center numpad digit or symbol page input is a composing
-                    // key, not a commitText() operation.
-                    val native = coreForRomaji()
-                    if (native != null) {
-                        typed.forEach { ch ->
-                            // Only the character: the Core decides the key from it
-                            // (a virtual key made from '.' would be Delete).
-                            val consumed = coreCharacter(ch.code)
-                            if (!consumed) {
-                                // A deliberately direct key still reaches the
-                                // editor, without a preceding commit of Japanese.
-                                insertPassed(ch.toString())
-                            }
-                        }
-                    } else {
-                        insert(typed)
-                    }
+                    insert(typed)
                 }
                 if (upper) setShift(shift.onCharTyped())
             }
@@ -721,7 +769,9 @@ class KeyboardService : InputMethodService(), KeyListener {
                 else -> bridge.deleteBeforeCursor()
             }
             KeyAction.Space -> {
-                if (coreInput.composing && coreForRomaji() != null) {
+                // Japanese QWERTY: the Core decides, also when nothing is being typed (its setting
+                // SpaceWidth: half-width by default, full-width when chosen), as on the Mac and Linux.
+                if (coreForRomaji() != null) {
                     if (!coreCharacter(' '.code)) insertPassed(" ")
                     return
                 }
@@ -729,6 +779,7 @@ class KeyboardService : InputMethodService(), KeyListener {
                 // 変換する欄では次の候補を選ぶ。変換しない欄では、持っている1文字を確定するだけ。
                 render(session.handle(Operation.Space))
                 if (!selecting) {
+                    // 12キーのかなも、Core と同じ設定（SpaceWidth）で幅を決める。
                     val full = nav.current.isJapanese && Settings(this).japaneseSpaceFullWidth
                     insert(if (full) "　" else " ")
                 }
@@ -861,7 +912,33 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     /** 未確定文字を作らずに、そのまま入力する。 */
     private fun insert(text: String) {
+        if (unconfirmed.isEmpty()) unconfirmedFrom = if (selStart == selEnd) selStart else -1
+        unconfirmed += text
         bridge.apply(Update(commit = text))
+    }
+
+    /**
+     * Text typed by [insert] that the editor has not reported yet (no onUpdateSelection since), and
+     * where the caret was before it. An editor that restarts the input closes its connection at once,
+     * while the keyboard writes to that connection until the restart reaches it: such text is lost
+     * unless typed again (see [typeLostTextAgain]).
+     */
+    private var unconfirmed = ""
+    private var unconfirmedFrom = -1
+
+    /**
+     * The editor restarted the input. If the caret is still where it was before the last unreported
+     * text, and that text is not before it, the text went to the closed connection: type it again.
+     */
+    private fun typeLostTextAgain(info: EditorInfo) {
+        val text = unconfirmed
+        val from = unconfirmedFrom
+        unconfirmed = ""
+        if (text.isEmpty() || from < 0 || info.initialSelStart != from || info.initialSelEnd != from) return
+        val input = currentInputConnection ?: return
+        if (input.getTextBeforeCursor(text.length, 0)?.toString() == text) return
+        input.commitText(text, 1)
+        caretWatch.replaced(0, text.length)
     }
 
     private fun setShift(value: ShiftState) {
@@ -946,5 +1023,14 @@ class KeyboardService : InputMethodService(), KeyListener {
         @Volatile internal var activeForSmokeTest: WeakReference<KeyboardService>? = null
         private const val TAG = "KeyboardService"
         private const val CONTEXT_LENGTH = 20
+
+        /** Keys that commit what is being typed before they type themselves (the 、 and 。 keys). */
+        private val CONFIRMING_PUNCTUATION = setOf("。", "、")
+
+        /**
+         * Without the Core (12-key, fields that do not convert), ? and ! also commit first and are
+         * typed as on the key, as before.
+         */
+        private val SENTENCE_END = setOf("！", "？", "!", "?")
     }
 }

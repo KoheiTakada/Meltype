@@ -293,6 +293,19 @@ class KeyboardView(context: Context) : View(context) {
         )
     }
 
+    /**
+     * Actual drawn key centre in display coordinates, for device-level touch QA.
+     * Using width / columns skips the side/top insets and can hit another row.
+     * Never used to synthesize production key events.
+     */
+    internal fun keyCenterOnScreenForSmokeTest(key: Key): Pair<Float, Float> {
+        val bounds = RectF()
+        keyRect(key, bounds)
+        val origin = IntArray(2)
+        getLocationOnScreen(origin)
+        return (origin[0] + bounds.centerX()) to (origin[1] + bounds.centerY())
+    }
+
     private fun keyAtPoint(x: Float, y: Float): Key? {
         val unitX = (x - outerSidePx) / cellW
         val unitY = (y - outerTopPx) / cellH
@@ -313,7 +326,13 @@ class KeyboardView(context: Context) : View(context) {
     /** [k] の押下が、いまも続いているか。繰り返しと長押しは、時刻が来るたびにこれを確かめる。 */
     private fun holds(k: Key): Boolean = pressed === k && tracker.tracking && isAttachedToWindow && isShown
 
+    /** The touches received lately: action, position in this view and the key there (smoke test only). */
+    @Volatile internal var touchLogForSmokeTest: String = ""
+        private set
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        touchLogForSmokeTest = (touchLogForSmokeTest + " | " + MotionEvent.actionToString(event.actionMasked) +
+            "(" + event.x.toInt() + "," + event.y.toInt() + ")=" + keyAtPoint(event.x, event.y)?.name).takeLast(600)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 releaseTouch()
