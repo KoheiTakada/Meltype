@@ -6,6 +6,9 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.view.MotionEvent
 import android.view.InputDevice
+import android.view.View
+import android.view.ViewGroup
+import io.github.ninjin0802.keyboard.app.input.Direction
 import android.view.inputmethod.InputMethodManager
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.ninjin0802.keyboard.app.layout.KeyAction
@@ -168,6 +171,84 @@ class ImeLaunchDeviceTest {
             isImeReadyFor(activity, editor,
                 io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI)
         }
+    }
+
+    private fun findImePicker(view: View): View? {
+        if (view.contentDescription == "別のキーボードに切り替える") return view
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                findImePicker(view.getChildAt(i))?.let { return it }
+            }
+        }
+        return null
+    }
+
+    /** Normal typing shows no extra switch button; recovery offers direct system IME selection. */
+    @Test fun keyboardProvidesImePickerOnlyInEmergency() = withRomajiActivity { activity ->
+        focusJapanese(activity, activity.japaneseEditor)
+        val service = KeyboardService.activeForSmokeTest?.get()
+            ?: throw AssertionError("Keyboard service missing")
+        instrumentation.runOnMainSync {
+            val root = service.window?.window?.decorView
+                ?: throw AssertionError("IME window not available")
+            assertTrue("Normal keyboard must not add a custom IME switch button",
+                findImePicker(root) == null)
+
+            val emergency = service.emergencyKeyboardForSmokeTest()
+            val picker = findImePicker(emergency)
+            assertNotNull("Emergency view must offer direct system IME selection", picker)
+            assertTrue("Emergency picker must be clickable", picker!!.isClickable)
+
+            fun containsSettingsLink(v: View): Boolean =
+                (v is android.widget.TextView && v.text.contains("キーボード設定")) ||
+                    (v is ViewGroup && (0 until v.childCount).any { containsSettingsLink(v.getChildAt(it)) })
+            assertTrue("Recovery must not send the user to a settings screen",
+                !containsSettingsLink(emergency))
+        }
+    }
+
+    /** A non-converting email editor still accepts literal keys if Japanese QWERTY is selected. */
+    @Test fun emailFieldAcceptsLiteralRomajiAfterLanguageSwitch() = withRomajiActivity { activity ->
+        requestKeyboard(activity, activity.editor)
+        waitUntil(
+            "English QWERTY in email editor", millis = 45_000,
+            retryEveryMillis = 2_000, retry = { requestKeyboard(activity, activity.editor) },
+            describe = { describeImeState(activity) },
+        ) {
+            activity.editor.hasFocus() &&
+                KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()?.layout?.id ==
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY
+        }
+
+        // The space-bar language popup and this key action both use the same
+        // screen navigation. Avoid depending on long-press gesture timing.
+        val service = KeyboardService.activeForSmokeTest?.get()
+            ?: throw AssertionError("Keyboard service missing")
+        instrumentation.runOnMainSync {
+            service.onKey(KeyAction.Language, Direction.TAP, SystemClock.uptimeMillis())
+        }
+        waitUntil("Japanese QWERTY after language switch",
+            describe = { describeImeState(activity) + ", selected=" + service.activeKeysForSmokeTest()?.layout?.id }) {
+            activity.editor.hasFocus() &&
+                service.activeKeysForSmokeTest()?.layout?.id ==
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI
+        }
+        // Android can restart input in the same editor after showing the IME.
+        // A restart must not reset the language that the user just selected.
+        requestKeyboard(activity, activity.editor)
+        waitUntil("Japanese QWERTY survives the same editor restart",
+            describe = { describeImeState(activity) + ", selected=" + service.activeKeysForSmokeTest()?.layout?.id }) {
+            activity.editor.hasFocus() &&
+                service.activeKeysForSmokeTest()?.layout?.id ==
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI
+        }
+        val keyboard = service.activeKeysForSmokeTest()
+            ?: throw AssertionError("Japanese keys not shown")
+        tap(keyboard, "a") { it is KeyAction.Romaji && it.char == 'a' }
+        waitUntil("literal romaji key appears in email editor") {
+            activity.editor.text.toString() == "a"
+        }
+        assertEquals("a", activity.editor.text.toString())
     }
 
     /** Runs [block] with the Japanese layout set to QWERTY romaji, the layout that goes through the native Core. */
@@ -496,33 +577,36 @@ class ImeLaunchDeviceTest {
                 retry = { requestKeyboard(activity, activity.editor) },
                 describe = { describeImeState(activity) },
             ) {
-                isImeReadyFor(activity, activity.editor,
-                    io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY)
+                val service = KeyboardService.activeForSmokeTest?.get()
+                // Previous editor's IME view can still be visible during a focus transition.
+                // Wait for this email field's English QWERTY layout, not just any key surface.
+                activity.hasWindowFocus() && activity.editor.hasFocus() &&
+                    service?.isInputViewShown == true && service.activeKeysForSmokeTest()?.let {
+                    it.isAttachedToWindow && it.isShown && it.width > 100 && it.height > 100 &&
+                        it.layout.id == io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY
+                } == true
             }
 
-            for ((index, letter) in listOf('a', 's', 'd').withIndex()) {
-                // Check ownership before every touch; the IME may detach while
-                // Android switches the focused window between test activities.
+            for ((index, letter) in listOf("a", "s", "d").withIndex()) {
+                // The system may recreate the input view after an asynchronous restartInput.
+                // Do not inject against coordinates cached from a detached IME window.
                 waitUntil(
-                    "email editor IME ready before key $letter",
-                    retryEveryMillis = 2_000,
-                    retry = { requestKeyboard(activity, activity.editor) },
+                    "visible English keys before $letter", millis = 45_000,
+                    retryEveryMillis = 2_000, retry = { requestKeyboard(activity, activity.editor) },
                     describe = { describeImeState(activity) },
                 ) {
-                    isImeReadyFor(activity, activity.editor,
-                        io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY)
+                    val current = KeyboardService.activeForSmokeTest?.get()
+                    activity.hasWindowFocus() && activity.editor.hasFocus() &&
+                        current?.isInputViewShown == true &&
+                        current.activeKeysForSmokeTest()?.layout?.id ==
+                            io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY
                 }
-                val keyboard = KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()
-                    ?: throw AssertionError("Keyboard detached before key $letter")
-                tap(keyboard, letter.toString()) {
-                    (it as? KeyAction.Text)?.text == letter.toString()
-                }
-                val expected = "asd".substring(0, index + 1)
-                waitUntil(
-                    "key $letter must enter exactly $expected",
-                    describe = { "text=" + activity.editor.text + " " + describeImeState(activity) },
-                ) {
-                    activity.editor.text.toString() == expected
+                val currentKeys = KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()
+                    ?: throw AssertionError("English keyboard detached before $letter")
+                tap(currentKeys, letter) { it is KeyAction.Text && it.text == letter }
+                waitUntil("key $letter must enter the app's EditText",
+                    describe = { describeImeState(activity) + ", text=" + activity.editor.text }) {
+                    activity.editor.text.toString().length >= index + 1
                 }
             }
             waitUntil("the three visible keys must generate text in the editor") {
@@ -532,13 +616,21 @@ class ImeLaunchDeviceTest {
 
             // Also exercise the normal Japanese-input route. A working email
             // keyboard alone could conceal a failing Japanese/native path.
-            focusJapanese(activity, activity.japaneseEditor)
-            val japanese = KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()
-                ?: throw AssertionError("Japanese keys not shown")
-            tap(japanese, "Japanese A") {
-                when (it) {
-                    is KeyAction.Romaji -> it.char == 'a'
-                    is KeyAction.Flick -> it.key.chars.firstOrNull() == 'あ'
+            instrumentation.runOnMainSync {
+                activity.japaneseEditor.requestFocus()
+                (activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                    as InputMethodManager).showSoftInput(
+                        activity.japaneseEditor, InputMethodManager.SHOW_IMPLICIT)
+            }
+            waitUntil("Japanese text field opens the Japanese romaji keyboard") {
+                KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()?.layout?.id ==
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI
+            }
+            val japanese = KeyboardService.activeForSmokeTest?.get()
+                ?.activeKeysForSmokeTest() ?: throw AssertionError("Japanese keys not shown")
+            val key = japanese.layout.keys.firstOrNull {
+                when (val action = it.action) {
+                    is KeyAction.Romaji -> action.char == 'a'
                     else -> false
                 }
             }

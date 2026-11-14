@@ -17,23 +17,15 @@ class Settings(private val context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val core by lazy { CoreConfig(coreDataDirectory(context)) }
 
-    var toggleEnabled: Boolean
-        get() = prefs.getBoolean(KEY_TOGGLE_ENABLED, false)
-        set(value) { prefs.edit().putBoolean(KEY_TOGGLE_ENABLED, value).apply() }
-
-    var toggleWaitMs: Int
-        get() = clampWait(prefs.getInt(KEY_TOGGLE_WAIT_MS, DEFAULT_WAIT_MS))
-        set(value) { prefs.edit().putInt(KEY_TOGGLE_WAIT_MS, clampWait(value)).apply() }
-
-    /** 日本語を打つ配列（spec 04「設定」の「日本語の入力」）。かな配列かローマ字配列。 */
+    /** 日本語入力はローマ字QWERTYに固定する。旧設定値も同じ配列として読み込む。 */
     var japaneseLayout: LayoutId
         get() = japaneseOf(prefs.getString(KEY_JAPANESE_LAYOUT, null))
-        set(value) { prefs.edit().putString(KEY_JAPANESE_LAYOUT, savedName(value)).apply() }
+        set(value) { prefs.edit().putString(KEY_JAPANESE_LAYOUT, savedName(LayoutId.ROMAJI)).apply() }
 
-    /** 英字を打つ配列（「英字の入力」）。英字配列か英字フリック配列。 */
+    /** 英語入力はQWERTYに固定する。 */
     var englishLayout: LayoutId
         get() = englishOf(prefs.getString(KEY_ENGLISH_LAYOUT, null))
-        set(value) { prefs.edit().putString(KEY_ENGLISH_LAYOUT, savedName(value)).apply() }
+        set(value) { prefs.edit().putString(KEY_ENGLISH_LAYOUT, savedName(LayoutId.QWERTY)).apply() }
 
     /**
      * 日本語入力のときの空白キーが全角か（Core の設定 SpaceWidth が FullWidth。config.json に書く）。
@@ -118,31 +110,18 @@ class Settings(private val context: Context) {
         const val KEY_ENGLISH_LAYOUT = "english_layout"
 
         /** 保存してある値から日本語の配列を決める。未設定・不明な値はローマ字配列。 */
-        fun japaneseOf(saved: String?): LayoutId = if (saved == savedName(LayoutId.KANA)) LayoutId.KANA else LayoutId.ROMAJI
+        fun japaneseOf(saved: String?): LayoutId = LayoutId.ROMAJI
 
         /** 保存してある値から、英語の配列を決める。保存がない・知らない値のときは、最初の値（英字配列）。 */
-        fun englishOf(saved: String?): LayoutId = if (saved == savedName(LayoutId.LATIN_FLICK)) LayoutId.LATIN_FLICK else LayoutId.QWERTY
+        fun englishOf(saved: String?): LayoutId = LayoutId.QWERTY
 
         /** 配列を保存するときの名前。選べない配列（数字・記号）は空で、読むと最初の値になる。 */
         fun savedName(layout: LayoutId): String = when (layout) {
-            LayoutId.KANA -> "kana"
             LayoutId.ROMAJI -> "romaji"
             LayoutId.QWERTY -> "qwerty"
-            LayoutId.LATIN_FLICK -> "flick"
             LayoutId.SYMBOLS, LayoutId.SYMBOLS2 -> ""
         }
 
-        private const val KEY_TOGGLE_ENABLED = "toggle_enabled"
-        private const val KEY_TOGGLE_WAIT_MS = "toggle_wait_ms"
-        private const val DEFAULT_WAIT_MS = 1000
-        private const val MIN_WAIT_MS = 300
-        private const val MAX_WAIT_MS = 2000
-        private const val STEP_MS = 100
 
-        /** 300〜2000 の範囲に収め、100 の倍数に丸める（半分は切り上げ）。 */
-        fun clampWait(ms: Int): Int {
-            val bounded = ms.coerceIn(MIN_WAIT_MS, MAX_WAIT_MS)
-            return (bounded + STEP_MS / 2) / STEP_MS * STEP_MS
-        }
     }
 }

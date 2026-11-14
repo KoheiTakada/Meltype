@@ -128,7 +128,7 @@ jobs:
           MELTYPE_VERSION_NAME: 0.1.${{ github.run_number }}
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon :engine:test :app:testDebugUnitTest :app:assembleRelease
+          ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleRelease
       - name: Verify Android 16 KiB ELF and APK alignment
         run: python3 android/tools/check-apk-16k.py android/app/build/outputs/apk/release/app-release.apk
       - name: Verify package and signing certificate

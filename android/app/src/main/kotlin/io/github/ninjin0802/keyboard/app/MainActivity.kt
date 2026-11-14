@@ -454,23 +454,14 @@ class MainActivity : Activity() {
         about(content)
     }
 
+    /** Current Android build offers only the Core-backed Japanese and English QWERTY layouts. */
     private fun languages(content: LinearLayout) {
         card(content, "言語") {
-            val romaji = settings.japaneseLayout == LayoutId.ROMAJI
-            entry("日本語", value = if (romaji) "QWERTY（ローマ字）" else "12キー（フリック）") { anchor ->
-                dropdown(anchor, if (romaji) 0 else 1,
-                    listOf("QWERTY（ローマ字）" to { settings.japaneseLayout = LayoutId.ROMAJI },
-                        "12キー（フリック）" to { settings.japaneseLayout = LayoutId.KANA }))
-            }
+            entry("日本語", value = "QWERTY（ローマ字）")
             divider()
-            val qwerty = settings.englishLayout == LayoutId.QWERTY
-            entry("English", value = if (qwerty) "QWERTY" else "12-key flick") { anchor ->
-                dropdown(anchor, if (qwerty) 0 else 1,
-                    listOf("QWERTY" to { settings.englishLayout = LayoutId.QWERTY },
-                        "12-key flick" to { settings.englishLayout = LayoutId.LATIN_FLICK }))
-            }
+            entry("English", value = "QWERTY")
         }
-        hint(content, "日本語QWERTYでは、入力内容から日本語と英語を自動判別する。")
+        hint(content, "日本語QWERTYでは、入力内容から日本語と英語を自動判別する。12キー・フリックは未提供。")
     }
 
     private fun general(content: LinearLayout) {
@@ -478,19 +469,6 @@ class MainActivity : Activity() {
             entry("振動", "キーを押したときに振動する",
                 checked = settings.hapticEnabled,
                 onToggle = { settings.hapticEnabled = it })
-            divider()
-            entry("12キーのトグル入力", "連続タップで同じキーの文字を切り替える",
-                checked = settings.toggleEnabled,
-                onToggle = { settings.toggleEnabled = it; render() })
-            if (settings.toggleEnabled) {
-                divider()
-                entry("トグル判定時間", value = waitText(settings.toggleWaitMs)) { anchor ->
-                    dropdown(anchor, progressOf(settings.toggleWaitMs),
-                        (0 until WAIT_STEPS).map { step ->
-                            waitText(waitOfProgress(step)) to { settings.toggleWaitMs = waitOfProgress(step) }
-                        })
-                }
-            }
             divider()
             entry("ライブ変換", "入力中に漢字・かなの変換候補を更新する",
                 checked = settings.liveConversionEnabled,

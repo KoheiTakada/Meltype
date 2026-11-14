@@ -112,21 +112,46 @@ class SettingsScreenDeviceTest {
         }
     }
 
+    @Test fun languageSettingsOfferOnlyJapaneseAndEnglishQwerty() {
+        val activity = open()
+        try {
+            instrumentation.runOnMainSync {
+                val label = findText(activity.window.decorView, "言語")
+                    ?: throw AssertionError("Languages category missing")
+                ((label.parent as View).parent as View).performClick()
+                val root = activity.window.decorView
+                val japanese = findText(root, "QWERTY（ローマ字）")
+                val english = findText(root, "QWERTY")
+                assertNotNull("Japanese QWERTY must be shown", japanese)
+                assertNotNull("English QWERTY must be shown", english)
+                assertTrue("Flick layouts must not be offered in #1149",
+                    findText(root, "12キー（フリック）") == null &&
+                    findText(root, "12-key flick") == null)
+                assertFalse("Japanese layout is fixed, not selectable",
+                    ((japanese!!.parent as View).parent as View).hasOnClickListeners())
+                assertFalse("English layout is fixed, not selectable",
+                    ((english!!.parent as View).parent as View).hasOnClickListeners())
+            }
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
     @Test fun launcherAlwaysOffersEscapeWhenTheInputMethodCannotStart() {
         val activity = open()
         try {
             instrumentation.runOnMainSync {
                 val root = activity.window.decorView
                 val picker = findText(root, "別のキーボードに切り替える")
-                val systemSettings = findText(root, "Androidのキーボード設定を開く")
-                assertNotNull("System IME picker must be reachable without launching the IME",
+                assertNotNull("System IME picker remains a last resort if the IME process cannot start",
                     picker)
-                assertNotNull("Android keyboard settings must remain reachable independently",
-                    systemSettings)
                 val pickerRow = (picker!!.parent as View).parent as View
-                val settingsRow = (systemSettings!!.parent as View).parent as View
                 assertTrue(pickerRow.hasOnClickListeners())
-                assertTrue(settingsRow.hasOnClickListeners())
+                // Emergency switching must not require opening a Settings screen.
+                // Onboarding can still show Android setup before Meltype is enabled.
+                if (findText(root, "Meltypeを有効にする") == null) {
+                    assertTrue(findText(root, "Androidのキーボード設定を開く") == null)
+                }
             }
         } finally {
             instrumentation.runOnMainSync { activity.finish() }

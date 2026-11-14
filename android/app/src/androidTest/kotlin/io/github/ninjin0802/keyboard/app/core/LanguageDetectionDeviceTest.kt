@@ -57,11 +57,12 @@ class LanguageDetectionDeviceTest {
             assertEquals(false, settings.japaneseSpaceFullWidth)
             assertEquals(false, settings.emojiEnabled)
 
-            settings.japaneseLayout = io.github.ninjin0802.keyboard.app.layout.LayoutId.KANA
+            check(prefs.edit().putString("japanese_layout", "kana").commit())
             settings.japaneseSpaceFullWidth = true
             settings.emojiEnabled = true
             val saved = io.github.ninjin0802.keyboard.app.Settings(ctx)
-            assertEquals(io.github.ninjin0802.keyboard.app.layout.LayoutId.KANA, saved.japaneseLayout)
+            // 12-key flick is not offered in PR #1149; even a legacy write must read as QWERTY.
+            assertEquals(io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI, saved.japaneseLayout)
             assertEquals(true, saved.japaneseSpaceFullWidth)
             assertEquals(true, saved.emojiEnabled)
             // The space is the Core's setting, which the Core reads for Japanese QWERTY.
@@ -297,9 +298,7 @@ class LanguageDetectionDeviceTest {
         val scaled = ctx.resources.displayMetrics.scaledDensity
         val bar = io.github.ninjin0802.keyboard.app.view.CandidateBarView(ctx)
         val candidate = "これは少し長めの予測変換候補です"
-        bar.show(listOf(io.github.ninjin0802.keyboard.engine.Candidate(
-            candidate, 0, io.github.ninjin0802.keyboard.engine.CandidateKind.PREDICTION
-        )), null)
+        bar.show(listOf(DisplayCandidate(candidate)), null)
         bar.measure(
             View.MeasureSpec.makeMeasureSpec((410f*density).toInt(), View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)

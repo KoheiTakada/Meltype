@@ -2,6 +2,7 @@
 // Copyright (C) 2026 KoheiTakada
 // Android JNI adapter for the Meltype.Native NativeAOT C ABI (meltype_ime_*).
 #include <jni.h>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -12,7 +13,7 @@
 #include <vector>
 
 extern "C" {
-int meltype_init(unsigned char* (*clauses)(unsigned char*, unsigned char*),
+int meltype_android_init(unsigned char* (*clauses)(unsigned char*, unsigned char*),
                  unsigned char* (*candidates)(unsigned char*),
                  int (*is_word)(unsigned char*));
 void* meltype_ime_create();
@@ -23,11 +24,27 @@ void meltype_free(unsigned char* ptr);
 
 namespace {
 std::mutex init_mutex;
+std::mutex handle_mutex;
 std::string data_dir;
+// MELTYPE_DATA_DIR/AppPaths are process-global. A failed Core init cannot safely be retried
+// with a different directory after the native runtime may have read the old one.
+bool init_attempted = false;
+// Core callbacks may execute on another JNI-attached thread. The result must be visible
+// to the thread waiting for meltype_ime_handle to finish.
+std::atomic<bool> callback_exception{false};
 JavaVM* vm = nullptr;
 jobject callback_instance = nullptr;
 jmethodID clauses_method = nullptr;
 jmethodID candidates_method = nullptr;
+
+// Never turn a Java/Kotlin converter exception into an apparently empty conversion.
+// Report the original stack, then signal the enclosing JNI handle call to fail.
+void describe_callback_exception(JNIEnv* env) {
+    if (!env->ExceptionCheck()) return;
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+    callback_exception.store(true);
+}
 
 struct CallbackEnvironment {
     JNIEnv* env = nullptr;
@@ -52,25 +69,28 @@ jbyteArray new_utf8_array(JNIEnv* env, const unsigned char* text) {
 }
 
 unsigned char* malloc_java_bytes(JNIEnv* env, jbyteArray result) {
-    if (env->ExceptionCheck()) { env->ExceptionClear(); return nullptr; }
+    if (env->ExceptionCheck()) { describe_callback_exception(env); return nullptr; }
     if (!result) return nullptr;
     const jsize length = env->GetArrayLength(result);
     auto* buffer = reinterpret_cast<unsigned char*>(std::malloc(static_cast<size_t>(length) + 1u));
     if (!buffer) return nullptr;
     if (length) env->GetByteArrayRegion(result, 0, length, reinterpret_cast<jbyte*>(buffer));
     buffer[length] = 0;
-    if (env->ExceptionCheck()) { env->ExceptionClear(); std::free(buffer); return nullptr; }
+    if (env->ExceptionCheck()) { describe_callback_exception(env); std::free(buffer); return nullptr; }
     return buffer;
 }
 
 unsigned char* convert_clauses(unsigned char* reading, unsigned char* context) {
     CallbackEnvironment jni;
-    if (!jni.env || !callback_instance || !clauses_method) return nullptr;
+    if (!jni.env || !callback_instance || !clauses_method) {
+        callback_exception.store(true);
+        return nullptr;
+    }
     auto* env = jni.env;
     const auto r = new_utf8_array(env, reading);
     const auto c = new_utf8_array(env, context);
     if (env->ExceptionCheck() || !r) {
-        env->ExceptionClear();
+        describe_callback_exception(env);
         if (r) env->DeleteLocalRef(r);
         if (c) env->DeleteLocalRef(c);
         return nullptr;
@@ -85,11 +105,14 @@ unsigned char* convert_clauses(unsigned char* reading, unsigned char* context) {
 
 unsigned char* convert_candidates(unsigned char* reading) {
     CallbackEnvironment jni;
-    if (!jni.env || !callback_instance || !candidates_method) return nullptr;
+    if (!jni.env || !callback_instance || !candidates_method) {
+        callback_exception.store(true);
+        return nullptr;
+    }
     auto* env = jni.env;
     const auto r = new_utf8_array(env, reading);
     if (env->ExceptionCheck() || !r) {
-        env->ExceptionClear(); if (r) env->DeleteLocalRef(r);
+        describe_callback_exception(env); if (r) env->DeleteLocalRef(r);
         return nullptr;
     }
     auto result = static_cast<jbyteArray>(env->CallObjectMethod(callback_instance, candidates_method, r));
@@ -141,7 +164,7 @@ Java_io_github_ninjin0802_keyboard_app_core_NativeApi_init(
     if (requested.empty() || requested.find('\0') != std::string::npos) return JNI_FALSE;
     std::lock_guard<std::mutex> guard(init_mutex);
     if (!data_dir.empty()) return data_dir == requested ? JNI_TRUE : JNI_FALSE;
-    if (setenv("MELTYPE_DATA_DIR", requested.c_str(), 1) != 0) return JNI_FALSE;
+    if (init_attempted) return JNI_FALSE;
     if (env->GetJavaVM(&vm) != JNI_OK) return JNI_FALSE;
     auto clazz = env->GetObjectClass(callbacks);
     if (!clazz) return JNI_FALSE;
@@ -160,7 +183,15 @@ Java_io_github_ninjin0802_keyboard_app_core_NativeApi_init(
     env->DeleteLocalRef(clazz);
     callback_instance = env->NewGlobalRef(callbacks);
     if (!callback_instance) return JNI_FALSE;
-    if (meltype_init(convert_clauses, convert_candidates, nullptr) != 1) {
+    // Environment and static Core paths may now be read by meltype_init.
+    // Never retry an incomplete init with another data directory.
+    init_attempted = true;
+    if (setenv("MELTYPE_DATA_DIR", requested.c_str(), 1) != 0) {
+        env->DeleteGlobalRef(callback_instance);
+        callback_instance = nullptr;
+        return JNI_FALSE;
+    }
+    if (meltype_android_init(convert_clauses, convert_candidates, nullptr) != 1) {
         env->DeleteGlobalRef(callback_instance);
         callback_instance = nullptr;
         return JNI_FALSE;
@@ -190,5 +221,13 @@ Java_io_github_ninjin0802_keyboard_app_core_NativeApi_handle(
     if (!host || !event) return nullptr;
     auto json = read_utf8(env, event);
     if (env->ExceptionCheck()) return nullptr;
-    return return_utf8(env, meltype_ime_handle(as_handle(host), json.data()));
+    // A callback error belongs to this handle invocation, never to another concurrent call.
+    std::lock_guard<std::mutex> handle_guard(handle_mutex);
+    callback_exception.store(false);
+    auto* result = meltype_ime_handle(as_handle(host), json.data());
+    if (callback_exception.load()) {
+        if (result) meltype_free(result);
+        return nullptr; // Kotlin reports Core failure and offers the emergency IME picker.
+    }
+    return return_utf8(env, result);
 }

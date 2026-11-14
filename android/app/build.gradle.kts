@@ -98,7 +98,6 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":engine"))
     implementation(project(":mozc"))
     // Bundled local OCR; translated text stays on-device (language models download on demand).
     implementation("com.google.mlkit:text-recognition-japanese:16.0.1")

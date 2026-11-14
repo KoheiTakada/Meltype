@@ -20,7 +20,7 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ImageView
 import android.widget.TextView
-import io.github.ninjin0802.keyboard.engine.Candidate
+import io.github.ninjin0802.keyboard.app.core.DisplayCandidate
 import io.github.ninjin0802.keyboard.app.clipboard.ClipboardIconView
 
 /** 変換候補を横に並べる。高さは候補が空でも変わらない（縦画面 44dp、横画面 36dp）。 */
@@ -38,7 +38,7 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
         // Also restores the 12dp leading/trailing inset visible on iOS.
         setPadding((7*density).toInt(), 0, (7*density).toInt(), 0)
     }
-    private var shown: List<Candidate> = emptyList()
+    private var shown: List<DisplayCandidate> = emptyList()
     private var shownSelected: Int? = null
     private var inlineSuggestion: BarSuggestion? = null
 
@@ -54,7 +54,7 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
     }
 
     /** Personal completion occupies slot three; copied text/images use one centered pill. */
-    fun show(candidates: List<Candidate>, selected: Int?, supplement: BarSuggestion? = null) {
+    fun show(candidates: List<DisplayCandidate>, selected: Int?, supplement: BarSuggestion? = null) {
         if (candidates == shown && selected == shownSelected && supplement == inlineSuggestion) return
         val redraw = candidates != shown || supplement != inlineSuggestion
         val pillOnly = supplement?.isClipboard == true && candidates.isEmpty()
