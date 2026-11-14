@@ -762,23 +762,17 @@ class KeyboardService : InputMethodService(), KeyListener {
         val space = AppChrome.dp(this, 15)
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-            setBackgroundColor(Color.WHITE)
-            addView(TextView(this@KeyboardService).apply {
-                text = "Meltype を起動できませんでした"
-                textSize = 16f
-                setTextColor(Color.BLACK)
-            })
-            addView(TextView(this@KeyboardService).apply {
-                text = "別のキーボードに切り替える"
-                contentDescription = text
-                gravity = Gravity.CENTER
-                textSize = 16f
-                setTextColor(Color.BLUE)
-                minimumHeight = (48 * resources.displayMetrics.density).toInt()
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { showSystemImePicker() }
+            setPadding(space, space, space, space)
+            setBackgroundColor(surface.background)
+            addView(AppChrome.text(this@KeyboardService,
+                "Meltype を起動できませんでした", 16f, strong = true))
+            addView(AppChrome.action(this@KeyboardService,
+                "別のキーボードに切り替える") {
+                showSystemImePicker()
+            }.apply {
+                contentDescription = "別のキーボードに切り替える"
+            }, LinearLayout.LayoutParams(-1, AppChrome.dp(this@KeyboardService, 48)).apply {
+                topMargin = space
             })
         }
     }
@@ -1081,6 +1075,14 @@ class KeyboardService : InputMethodService(), KeyListener {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         selStart = newSelStart
         selEnd = newSelEnd
+        // A reported selection completes any pending direct-input write.
+        unconfirmed = ""
+        // Forced English, number and telephone fields commit directly instead of via Core.
+        // Do not discard their personal suggestion keys on the editor's own caret update.
+        val ownDirectInput = personalInputStarted && personalKeys.isOwnDirectInput(
+            currentInputConnection?.getTextBeforeCursor(96, 0),
+            selectionCollapsed = newSelStart == newSelEnd,
+        )
         if (forgetCompositionIfEditorWasCleared()) return
         // Core の書き換えでないキャレットの移動は、Core に知らせる（変換中なら、出ている文字のまま確定させる）。
         if (!caretWatch.isOwn(newSelStart, newSelEnd, candidatesEnd, coreInput.composing)) {
