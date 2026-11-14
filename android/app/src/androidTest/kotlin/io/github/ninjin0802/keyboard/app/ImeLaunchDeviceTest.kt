@@ -423,22 +423,25 @@ class ImeLaunchDeviceTest {
     }
 
     /**
-     * An editor that restarts the input right after the first character (as Chrome does in many web
-     * forms) must keep what is being typed: k then a is か, not a lost k (or a committed k + あ).
+     * The editor restarts after its first VISIBLE character, as a web form can do on text change.
+     * A bare "k" can still be buffered as romaji with no editor text, so it cannot trigger the
+     * editor's TextWatcher and must not be used to arrange this restart.
+     * After typing "a" and restarting, the following "ka" must make あか, not lose the あ.
      */
     @Test fun aRestartAfterTheFirstCharacterKeepsWhatIsBeingTyped() = withRomajiActivity { activity ->
         val editor = activity.restartingEditor
         focusJapanese(activity, editor)
         val starts = KeyboardService.activeForSmokeTest?.get()?.inputStartsForSmokeTest ?: 0
-        typeRomaji("k")
-        // The restart reaches the keyboard before the next key, as it does for a person typing.
-        waitUntil("the editor restarted the input after the first character", describe = { "text=" + editor.text }) {
+        typeRomaji("a")
+        // Wait for the actual app-triggered restart, not only for a visible keyboard.
+        waitUntil("the editor restarted the input after the first visible character",
+            describe = { "text=" + editor.text + " restarts=" + activity.restarts + " " + describeImeState(activity) }) {
             activity.restarts == 1 && (KeyboardService.activeForSmokeTest?.get()?.inputStartsForSmokeTest ?: 0) > starts
         }
         focusJapanese(activity, editor)
-        typeRomaji("a\n")
-        waitUntil("ka is か", describe = { "text=" + editor.text + " " + describeImeState(activity) }) {
-            editor.text.toString() == "か" && composingStart(editor) < 0
+        typeRomaji("ka\n")
+        waitUntil("aka is あか", describe = { "text=" + editor.text + " " + describeImeState(activity) }) {
+            editor.text.toString() == "あか" && composingStart(editor) < 0
         }
     }
 
