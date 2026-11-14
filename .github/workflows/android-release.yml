@@ -80,7 +80,9 @@ jobs:
           PY
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || '3c8a22a581eeb531b58150f37e20690feda308fe' }}
+          # An explicit one-time publish marker builds the already-QA-approved upstream PR.
+          # The normal personal release path remains unchanged.
+          ref: ${{ contains(github.event.head_commit.message, '[publish-pr1149]') && '76c6d1f95f025b7393bbd3a0d8d32a1bbcc58f28' || (inputs.source_ref || '3c8a22a581eeb531b58150f37e20690feda308fe') }}
           fetch-depth: 0
       - name: Record exact source commit
         id: source
@@ -135,7 +137,13 @@ jobs:
           MELTYPE_VERSION_NAME: 0.1.${{ github.run_number }}
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon :engine:test :app:testDebugUnitTest :app:assembleRelease
+          # The upstream PR removed the obsolete Kotlin :engine module.
+          # Preserve its tests for personal releases that still include it.
+          tasks=(:app:testDebugUnitTest :app:assembleRelease)
+          if grep -q '":engine"' settings.gradle.kts; then
+            tasks=(:engine:test "${tasks[@]}")
+          fi
+          ./gradlew --no-daemon "${tasks[@]}"
       - name: Verify Android 16 KiB ELF and APK alignment
         run: python3 android/tools/check-apk-16k.py android/app/build/outputs/apk/release/app-release.apk
       - name: Verify package and signing certificate
@@ -183,8 +191,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           VERSION_NUMBER: ${{ github.run_number }}
+          PUBLISH_PR1149: ${{ contains(github.event.head_commit.message, '[publish-pr1149]') }}
         run: |
           set -euo pipefail
-          tag="android-v0.1.$VERSION_NUMBER"
-          printf 'Meltype Android personal edition from %s\nSigned with the permanent Meltype key (matches v0.1.10/v0.1.11).\nPackage ID: app.meltype.keyboard\nSource verified in exact-SHA Android 15/17 QA before release.\n' "$SOURCE_SHA" > android/build/distribution/RELEASE-NOTES.md
-          gh release create "$tag" android/build/distribution/Meltype.apk#Meltype.apk android/build/distribution/Meltype.sha256#Meltype.sha256 --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --title "Meltype Android 0.1.$VERSION_NUMBER" --notes-file android/build/distribution/RELEASE-NOTES.md --prerelease
+          # A distinct prerelease and filename keep the upstream PR build separate
+          # from personal-edition releases, which must retain their old tags/assets.
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${PUBLISH_PR1149}" == "true" ]]; then
+            tag="android-pr1149-v0.1.$VERSION_NUMBER"
+            title="Meltype Android upstream PR #1149 0.1.$VERSION_NUMBER"
+            cp android/build/distribution/Meltype.apk android/build/distribution/Meltype-upstream-PR1149.apk
+            printf 'Meltype upstream PR #1149 build from %s\nExact SHA passed Android 15 and Android 17 QA on the fork.\nSigned with the permanent Meltype key; installs with package app.meltype.keyboard (replaces the personal edition, not alongside it).\nThis is not an official release from yksr-melt/Meltype.\n' "$SOURCE_SHA" > android/build/distribution/RELEASE-NOTES.md
+            gh release create "$tag" android/build/distribution/Meltype-upstream-PR1149.apk#Meltype-upstream-PR1149.apk android/build/distribution/Meltype.sha256#Meltype.sha256 --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --title "$title" --notes-file android/build/distribution/RELEASE-NOTES.md --prerelease
+          else
+            tag="android-v0.1.$VERSION_NUMBER"
+            printf 'Meltype Android personal edition from %s\nSigned with the permanent Meltype key (matches v0.1.10/v0.1.11).\nPackage ID: app.meltype.keyboard\nSource verified in exact-SHA Android 15/17 QA before release.\n' "$SOURCE_SHA" > android/build/distribution/RELEASE-NOTES.md
+            gh release create "$tag" android/build/distribution/Meltype.apk#Meltype.apk android/build/distribution/Meltype.sha256#Meltype.sha256 --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --title "Meltype Android 0.1.$VERSION_NUMBER" --notes-file android/build/distribution/RELEASE-NOTES.md --prerelease
+          fi
