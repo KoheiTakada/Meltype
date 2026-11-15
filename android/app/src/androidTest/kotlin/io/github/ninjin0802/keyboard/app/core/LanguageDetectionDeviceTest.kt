@@ -57,7 +57,7 @@ class LanguageDetectionDeviceTest {
             assertEquals(false, settings.japaneseSpaceFullWidth)
             assertEquals(false, settings.emojiEnabled)
 
-            check(prefs.edit().putString("japanese_layout", "kana").commit())
+            check(ctx.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putString("japanese_layout", "kana").commit())
             settings.japaneseSpaceFullWidth = true
             settings.emojiEnabled = true
             val saved = io.github.ninjin0802.keyboard.app.Settings(ctx)
