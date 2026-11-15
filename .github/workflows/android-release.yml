@@ -80,9 +80,11 @@ jobs:
           PY
       - uses: actions/checkout@v4
         with:
+          # A tagged personal release uses the exact QA-approved pre-merge SHA.
+          # Its source tree matches the merged personal/android-development commit b4ab3fc.
           # An explicit one-time publish marker builds the already-QA-approved upstream PR.
           # The normal personal release path remains unchanged.
-          ref: ${{ contains(github.event.head_commit.message, '[publish-pr1149]') && '76c6d1f95f025b7393bbd3a0d8d32a1bbcc58f28' || (inputs.source_ref || '3c8a22a581eeb531b58150f37e20690feda308fe') }}
+          ref: ${{ contains(github.event.head_commit.message, '[publish-personal-merged]') && '8a4f613238c5f89594ee5563c90ed89ab042530b' || (contains(github.event.head_commit.message, '[publish-pr1149]') && '76c6d1f95f025b7393bbd3a0d8d32a1bbcc58f28' || (inputs.source_ref || '3c8a22a581eeb531b58150f37e20690feda308fe')) }}
           fetch-depth: 0
       - name: Record exact source commit
         id: source
