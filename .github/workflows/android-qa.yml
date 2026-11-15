@@ -1,15 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 KoheiTakada
 name: Android QA — reproducible device tests
+# Run emulator tests on PRs, not twice on both push and pull_request.
 on:
-  push:
-    branches: [feat/android-bilingual-adaptive-ime, feature/android-keyboard-essentials, feature/android-personal-info-settings, personal/android-development]
-    paths:
-      - 'android/**'
-      - 'src/Meltype.Core/**'
-      - 'src/Meltype.Core.Tests/**'
-      - 'src/Meltype.Mac.Native/**'
-      - '.github/workflows/android-qa.yml'
   pull_request:
     paths:
       - 'android/**'

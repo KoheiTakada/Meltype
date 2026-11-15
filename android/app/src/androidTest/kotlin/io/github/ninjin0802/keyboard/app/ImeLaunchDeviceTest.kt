@@ -106,11 +106,13 @@ class ImeLaunchDeviceTest {
     ): Boolean {
         val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
             as InputMethodManager
-        val service = KeyboardService.activeForSmokeTest?.get()
-        val keys = service?.activeKeysForSmokeTest()
+        val service = KeyboardService.activeForSmokeTest?.get() ?: return false
+        val keys = service.activeKeysForSmokeTest() ?: return false
         return activity.hasWindowFocus() && editor.hasFocus() &&
-            imm.isActive(editor) && service?.isInputViewShown == true &&
-            keys != null && keys.layout.id == expectedLayout &&
+            imm.isActive(editor) && service.isInputViewShown &&
+            service.currentInputConnection != null &&
+            (editor.id == View.NO_ID || service.currentInputEditorInfo?.fieldId == editor.id) &&
+            keys.layout.id == expectedLayout &&
             keys.isAttachedToWindow && keys.isShown && keys.width > 100 && keys.height > 100
     }
 
@@ -236,11 +238,23 @@ class ImeLaunchDeviceTest {
         // Android can restart input in the same editor after showing the IME.
         // A restart must not reset the language that the user just selected.
         requestKeyboard(activity, activity.editor)
-        waitUntil("Japanese QWERTY survives the same editor restart",
-            describe = { describeImeState(activity) + ", selected=" + service.activeKeysForSmokeTest()?.layout?.id }) {
-            activity.editor.hasFocus() &&
-                service.activeKeysForSmokeTest()?.layout?.id ==
-                    io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI
+        waitUntil(
+            "Japanese QWERTY survives the same editor restart",
+            millis = 45_000,
+            retryEveryMillis = 2_000,
+            retry = { requestKeyboard(activity, activity.editor) },
+            describe = { describeImeState(activity) + ", selected=" + service.activeKeysForSmokeTest()?.layout?.id },
+        ) {
+            isImeReadyFor(activity, activity.editor,
+                io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI)
+        }
+        // Require the editor binding to remain active after the asynchronous restart.
+        repeat(3) {
+            Thread.sleep(200)
+            instrumentation.waitForIdleSync()
+            assertTrue("IME lost restarted editor binding: " + describeImeState(activity),
+                isImeReadyFor(activity, activity.editor,
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI))
         }
         val keyboard = service.activeKeysForSmokeTest()
             ?: throw AssertionError("Japanese keys not shown")
