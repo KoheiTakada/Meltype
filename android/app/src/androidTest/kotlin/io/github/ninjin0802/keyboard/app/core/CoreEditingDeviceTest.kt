@@ -52,16 +52,24 @@ class CoreEditingDeviceTest {
                 ?: throw AssertionError("No alternate candidate: ${adapter.choices} in $view")
         }
 
-        /** Uses a sentence converted by Mozc into three clauses, then selects the first. */
+        /**
+         * Use the converter fixture's exact reading. Core can first offer a one-clause
+         * whole-sentence alternative; Left expands it to its original Mozc clauses.
+         * Then navigate to the first clause as a real Core input event would.
+         */
         fun convertThreeClauses() {
-            type("watashinonamaehanakanodesu ")
+            type("hashiwokaminikaku ")
             val initial = adapter.view
             assertTrue("Not a conversion: $initial", initial?.converting == true)
-            assertEquals("Not converted in three clauses: $initial", 3, initial!!.clauses.size)
-            // Core starts on the final clause. Left moves through real clause selection;
-            // Android does not get to override which clause the Core chooses.
-            repeat(initial.selectedClause) {
-                assertTrue("Left must be consumed during conversion",
+            if (initial!!.clauses.size == 1) {
+                assertTrue("Left must expand the whole-sentence alternative",
+                    send(ImeJson.virtualKey(0x25, field())))
+            }
+            val split = adapter.view ?: throw AssertionError("Conversion ended after Left")
+            assertEquals("The converter fixture must yield three clauses: $split",
+                3, split.clauses.size)
+            repeat(split.selectedClause) {
+                assertTrue("Left must navigate to the first clause",
                     send(ImeJson.virtualKey(0x25, field())))
             }
             assertEquals("First clause was not selected: ${adapter.view}",
