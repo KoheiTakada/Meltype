@@ -52,10 +52,12 @@ const code = text => '`' + String(text ?? '').replace(/`/g, 'ˋ') + '`';
 
 const copyrightOf = line => /copyright\s*(\(c\)|©)?\s*\d{4}/i.test(line) ? line.replace(/^[\s#/;*!<>-]*(rem\s+)?/i, '').trim() : null;
 
-function check(files, author) {
+function check(files, author, verifiedImports = new Set()) {
   const findings = [];
   const isOwner = Owners.some(o => o.toLowerCase() === author.toLowerCase());
   for (const file of files) {
+    // The exact upstream blob carries its original author's copyright.
+    if (verifiedImports.has(file.filename)) continue;
     if (!SourceFile.test(file.filename)) continue;
     const added = addedLines(file.patch);
     if (file.status === 'added') {
@@ -101,11 +103,35 @@ function message(findings, author) {
 const escapeData = text => text.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
 const escapeProperty = text => escapeData(text).replace(/:/g, '%3A').replace(/,/g, '%2C');
 
+/**
+ * In a fork, unchanged source files imported from the official upstream main
+ * retain their upstream author's attribution. Verify each added file by blob SHA;
+ * a rewritten file, a new file, or an unreachable upstream tree is still checked.
+ */
+async function originalUpstreamImports(files) {
+  if (!repo || repo.toLowerCase() === 'yksr-melt/meltype') return new Set();
+  const candidates = files.filter(file => file.status === 'added' &&
+    SourceFile.test(file.filename) && addedLines(file.patch).some(line => {
+      const copyright = copyrightOf(line);
+      return copyright && OwnerName.test(copyright);
+    }));
+  if (candidates.length === 0) return new Set();
+  // Use the actual public repository tree, not a file name or a declaration in a PR.
+  const upstream = await gh('GET', `${api}/repos/yksr-melt/Meltype/git/trees/main?recursive=1`);
+  if (!upstream || upstream.truncated || !Array.isArray(upstream.tree)) return new Set();
+  const original = new Map(upstream.tree.filter(entry => entry.type === 'blob')
+    .map(entry => [entry.path, entry.sha]));
+  return new Set(candidates.filter(file => original.get(file.filename) === file.sha)
+    .map(file => file.filename));
+}
+
 async function main() {
   const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const pr = event.pull_request;
   const author = pr.user.login;
-  const findings = check(await changedFiles(pr.number), author);
+  const files = await changedFiles(pr.number);
+  const verified = await originalUpstreamImports(files);
+  const findings = check(files, author, verified);
   if (!findings.length) return;
   for (const f of findings) {
     for (const problem of f.problems) console.log(`::error file=${escapeProperty(f.file)},line=1::${escapeData(problem)}`);
