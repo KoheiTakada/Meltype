@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Verification-only workflow on an isolated fork branch; not part of PR #1149.
+name: PR1149 expectation probe
+on:
+  push:
+    branches: [ci/pr1149-expect-probe]
+permissions:
+  contents: read
+jobs:
+  expectations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Download the same upstream Mozc helper as the official check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo yksr-melt/Meltype --pattern 'Meltype-*-linux.zip' --dir "$RUNNER_TEMP/release"
+          unzip -q "$RUNNER_TEMP"/release/*.zip -d "$RUNNER_TEMP/release"
+          helper="$RUNNER_TEMP/release/Meltype-linux/mozc/meltype_mozc_helper"
+          test -s "$helper"
+          chmod +x "$helper"
+          echo "MELTYPE_MOZC=$helper" >> "$GITHUB_ENV"
+      - name: Run concrete review expectations
+        run: |
+          printf 'ka\tか\nhello\thello\narigatou\tありがとう\n' > "$RUNNER_TEMP/cases.txt"
+          dotnet run --project src/Meltype.Core.Tests -c Release -- --expect "$RUNNER_TEMP/cases.txt" "$RUNNER_TEMP/cases.json"
+          node .github/bot/pr-checks.mjs expect "$RUNNER_TEMP/cases.json"
+          cat "$RUNNER_TEMP/cases.json"
