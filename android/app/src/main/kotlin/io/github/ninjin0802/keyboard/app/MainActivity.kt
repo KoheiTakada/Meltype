@@ -308,15 +308,19 @@ class MainActivity : Activity() {
             })
             row.setOnClickListener { toggle.performClick() }
             row.isFocusable = true
-        } else if (action != null) {
+        } else {
+            // Read-only language rows have values but no click action. Show the value
+            // without a misleading drop-down icon; actionable rows keep their chevron.
             if (value != null) {
                 row.addView(text(value, 15f, muted = true),
                     LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(12) })
             }
-            row.addView(icon(if (value != null) R.drawable.ms_arrow_drop_down else R.drawable.ms_chevron_right),
-                LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginStart = dp(4) })
-            row.setOnClickListener { action(it) }
-            row.isFocusable = true
+            if (action != null) {
+                row.addView(icon(if (value != null) R.drawable.ms_arrow_drop_down else R.drawable.ms_chevron_right),
+                    LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginStart = dp(4) })
+                row.setOnClickListener { action(it) }
+                row.isFocusable = true
+            }
         }
         addView(row)
     }

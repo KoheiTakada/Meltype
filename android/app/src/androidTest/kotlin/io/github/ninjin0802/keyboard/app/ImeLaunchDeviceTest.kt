@@ -415,30 +415,30 @@ class ImeLaunchDeviceTest {
     }
 
     /**
-     * With the real converter: after Space, a candidate tap chooses it for the selected clause and
-     * moves on to the next clause; the tap on the last clause commits the whole sentence.
+     * On a real Android QWERTY keyboard, Space starts on the Core's final clause.
+     * Tapping an alternate candidate there must commit the full sentence without changing
+     * the earlier clauses. Earlier-clause navigation is separately exercised through Core
+     * key events in CoreEditingDeviceTest.
      */
-    @Test fun candidateTapsFixAConversionClauseByClause() = withRomajiActivity { activity ->
+    @Test fun candidateTapOnFinalClauseKeepsEarlierClausesAndCommits() = withRomajiActivity { activity ->
         val editor = activity.japaneseEditor
         focusJapanese(activity, editor)
         clear(editor)
         focusJapanese(activity, editor)
         typeRomaji("watashinonamaehanakanodesu ")
-        waitUntil("the sentence is converted", describe = { "view=" + coreView() }) { coreView()?.converting == true }
-        val clauses = coreView()!!.clauses.size
-        assertTrue("The sentence was not split into clauses: " + coreView(), clauses >= 2)
-        var expected = ""
-        for (clause in 0 until clauses) {
-            val view = coreView() ?: throw AssertionError("Committed before clause $clause: " + editor.text)
-            assertEquals("Not moved on to clause $clause: $view", clause, view.selectedClause)
-            assertTrue("Not composing at clause $clause: " + editor.text,
-                android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text) >= 0)
-            val label = tapCandidateOtherThan(view.clauses[clause])
-            expected = view.clauses.take(clause).joinToString("") + label + view.clauses.drop(clause + 1).joinToString("")
+        waitUntil("the sentence is converted", describe = { "view=" + coreView() }) {
+            coreView()?.converting == true
         }
-        waitUntil("the sentence is committed as chosen", describe = { "text=" + editor.text + " expected=" + expected }) {
-            editor.text.toString() == expected &&
-                android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text) < 0
+        val view = coreView() ?: throw AssertionError("Core conversion disappeared")
+        assertTrue("The sentence was not split: $view", view.clauses.size >= 2)
+        assertEquals("The Core should select its final clause after Space: $view",
+            view.clauses.lastIndex, view.selectedClause)
+        assertTrue("Not composing: $view", composingStart(editor) >= 0)
+        val chosen = tapCandidateOtherThan(view.clauses.last())
+        val expected = view.clauses.dropLast(1).joinToString("") + chosen
+        waitUntil("the final candidate commits the complete sentence",
+            describe = { "text=" + editor.text + " expected=" + expected }) {
+            editor.text.toString() == expected && composingStart(editor) < 0
         }
     }
 
@@ -615,14 +615,8 @@ class ImeLaunchDeviceTest {
                 retry = { requestKeyboard(activity, activity.editor) },
                 describe = { describeImeState(activity) },
             ) {
-                val service = KeyboardService.activeForSmokeTest?.get()
-                // Previous editor's IME view can still be visible during a focus transition.
-                // Wait for this email field's English QWERTY layout, not just any key surface.
-                activity.hasWindowFocus() && activity.editor.hasFocus() &&
-                    service?.isInputViewShown == true && service.activeKeysForSmokeTest()?.let {
-                    it.isAttachedToWindow && it.isShown && it.width > 100 && it.height > 100 &&
-                        it.layout.id == io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY
-                } == true
+                isImeReadyFor(activity, activity.editor,
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY)
             }
 
             for ((index, letter) in listOf("a", "s", "d").withIndex()) {
@@ -633,11 +627,8 @@ class ImeLaunchDeviceTest {
                     retryEveryMillis = 2_000, retry = { requestKeyboard(activity, activity.editor) },
                     describe = { describeImeState(activity) },
                 ) {
-                    val current = KeyboardService.activeForSmokeTest?.get()
-                    activity.hasWindowFocus() && activity.editor.hasFocus() &&
-                        current?.isInputViewShown == true &&
-                        current.activeKeysForSmokeTest()?.layout?.id ==
-                            io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY
+                    isImeReadyFor(activity, activity.editor,
+                        io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY)
                 }
                 val currentKeys = KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()
                     ?: throw AssertionError("English keyboard detached before $letter")
@@ -660,19 +651,19 @@ class ImeLaunchDeviceTest {
                     as InputMethodManager).showSoftInput(
                         activity.japaneseEditor, InputMethodManager.SHOW_IMPLICIT)
             }
-            waitUntil("Japanese text field opens the Japanese romaji keyboard") {
-                KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()?.layout?.id ==
-                    io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI
+            waitUntil("Japanese editor is bound to the native QWERTY keyboard",
+                millis = 45_000, retryEveryMillis = 2_000,
+                retry = { requestKeyboard(activity, activity.japaneseEditor) },
+                describe = { describeImeState(activity) }) {
+                isImeReadyFor(activity, activity.japaneseEditor,
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI)
             }
             val japanese = KeyboardService.activeForSmokeTest?.get()
                 ?.activeKeysForSmokeTest() ?: throw AssertionError("Japanese keys not shown")
-            val key = japanese.layout.keys.firstOrNull {
-                when (val action = it.action) {
-                    is KeyAction.Romaji -> action.char == 'a'
-                    else -> false
-                }
-            }
-            waitUntil("Japanese key must write composing text into the editor") {
+            // Exercise an actual touch, not just the existence of a layout key.
+            tap(japanese, "a") { it is KeyAction.Romaji && it.char == 'a' }
+            waitUntil("Japanese key must write composing text into the editor",
+                describe = { describeImeState(activity) + ", text=" + activity.japaneseEditor.text }) {
                 activity.japaneseEditor.text.isNotEmpty()
             }
             // The Kotlin romaji path would also write text. Require that the key

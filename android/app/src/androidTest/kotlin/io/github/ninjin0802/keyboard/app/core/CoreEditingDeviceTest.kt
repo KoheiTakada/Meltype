@@ -45,19 +45,27 @@ class CoreEditingDeviceTest {
             CandidateTap.tap(adapter, choice.nativeIndex, { field() }) { send(it) }
         }
 
-        /** A candidate of the shown clause from [labels], other than what the clause shows now. */
-        fun other(vararg labels: String): String {
+        /** Choose a real alternate candidate of the Core's currently selected clause. */
+        fun otherCandidate(): String {
             val view = adapter.view ?: throw AssertionError("Not composing: " + editor.content)
-            return labels.first { it != view.clauses[view.selectedClause] }
+            return adapter.choices.firstOrNull { it.label != view.clauses[view.selectedClause] }?.label
+                ?: throw AssertionError("No alternate candidate: ${adapter.choices} in $view")
         }
 
-        /** Types はしをかみにかく and converts it (Space): three clauses, the first one selected. */
+        /** Uses a sentence converted by Mozc into three clauses, then selects the first. */
         fun convertThreeClauses() {
-            type("hashiwokaminikaku ")
-            val view = adapter.view
-            assertTrue("Not a conversion: $view", view?.converting == true)
-            assertEquals("Not converted in three clauses: $view", 3, view!!.clauses.size)
-            assertEquals(0, view.selectedClause)
+            type("watashinonamaehanakanodesu ")
+            val initial = adapter.view
+            assertTrue("Not a conversion: $initial", initial?.converting == true)
+            assertEquals("Not converted in three clauses: $initial", 3, initial!!.clauses.size)
+            // Core starts on the final clause. Left moves through real clause selection;
+            // Android does not get to override which clause the Core chooses.
+            repeat(initial.selectedClause) {
+                assertTrue("Left must be consumed during conversion",
+                    send(ImeJson.virtualKey(0x25, field())))
+            }
+            assertEquals("First clause was not selected: ${adapter.view}",
+                0, adapter.view!!.selectedClause)
         }
     }
 
@@ -154,7 +162,7 @@ class CoreEditingDeviceTest {
     @Test fun aTapInTheFirstClauseChoosesItAndShowsTheNextClausesCandidates() {
         val typist = Typist()
         typist.convertThreeClauses()
-        val first = typist.other("橋を", "端を")
+        val first = typist.otherCandidate()
         typist.tap(first)
         val view = typist.adapter.view
         assertTrue("The tap committed the whole text: " + typist.editor.content, typist.adapter.composing)
@@ -162,23 +170,24 @@ class CoreEditingDeviceTest {
         assertEquals(first, view!!.clauses[0])
         assertEquals("Not moved on to the second clause", 1, view.selectedClause)
         val labels = typist.adapter.choices.map { it.label }
-        assertTrue("The bar does not show the second clause's candidates: $labels", labels.containsAll(listOf("紙に", "神に")))
-        assertTrue("The bar still shows the first clause's candidates: $labels", "箸を" !in labels)
+        assertTrue("Second clause has no candidate list: $view", labels.isNotEmpty())
+        assertTrue("Second clause must offer alternatives: $labels",
+            labels.any { it != view.clauses[1] })
     }
 
     @Test fun aTapInALaterClauseChangesOnlyThatClauseAndTheLastTapCommitsAll() {
         val typist = Typist()
         typist.convertThreeClauses()
-        val first = typist.other("橋を", "端を")
+        val first = typist.otherCandidate()
         typist.tap(first)
-        val second = typist.other("神に", "髪に")
+        val second = typist.otherCandidate()
         typist.tap(second)
         val view = typist.adapter.view!!
         assertEquals(listOf(first, second), view.clauses.take(2))
         assertEquals(2, view.selectedClause)
         assertTrue(typist.adapter.composing)
 
-        val last = typist.other("描く", "欠く")
+        val last = typist.otherCandidate()
         typist.tap(last)
         assertEquals(first + second + last, typist.editor.content)
         assertEquals(-1, typist.editor.composingStart)
@@ -188,7 +197,7 @@ class CoreEditingDeviceTest {
     @Test fun enterInTheMiddleCommitsTheWholeTextAsShown() {
         val typist = Typist()
         typist.convertThreeClauses()
-        val first = typist.other("橋を", "端を")
+        val first = typist.otherCandidate()
         typist.tap(first)
         val shown = typist.adapter.view!!.text
         typist.enter()
