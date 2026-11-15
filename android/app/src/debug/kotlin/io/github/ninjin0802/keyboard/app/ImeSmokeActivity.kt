@@ -14,6 +14,10 @@ class ImeSmokeActivity : Activity() {
         private set
     lateinit var japaneseEditor: EditText
         private set
+    lateinit var sendButton: android.widget.Button
+        private set
+    var lastSentMessage = ""
+        private set
 
     /**
      * A text field that restarts the input right after its first character, as Chrome does for many
@@ -28,6 +32,8 @@ class ImeSmokeActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        // Keep the real input window available throughout the on-device QA.
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         editor = EditText(this).apply {
             id = android.R.id.edit
             hint = "IME smoke input"
@@ -61,11 +67,21 @@ class ImeSmokeActivity : Activity() {
                 }
             }
         })
+        sendButton = android.widget.Button(this).apply {
+            text = "Send"
+            isFocusable = false
+            isFocusableInTouchMode = false
+            setOnClickListener {
+                lastSentMessage = japaneseEditor.text.toString()
+                japaneseEditor.setText("")
+            }
+        }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 80, 24, 24)
             addView(editor, LinearLayout.LayoutParams(-1, -2))
             addView(japaneseEditor, LinearLayout.LayoutParams(-1, -2))
+            addView(sendButton, LinearLayout.LayoutParams(-1, -2))
             addView(restartingEditor, LinearLayout.LayoutParams(-1, -2))
         })
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)

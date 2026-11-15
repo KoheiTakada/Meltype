@@ -16,6 +16,11 @@ concurrency:
   group: pr-expectations-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+# Stop when any step in a pipeline fails (upstream main, #1842).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   expectations:
     name: 報告の再現
@@ -39,7 +44,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download --repo "$GITHUB_REPOSITORY" --pattern 'Meltype-*-linux.zip' --dir "$RUNNER_TEMP/release"
+          # The personal fork publishes Android APKs, not the desktop Mozc helper.
+          # Use the canonical public Meltype release for Core input expectations.
+          gh release download --repo "yksr-melt/Meltype" --pattern 'Meltype-*-linux.zip' --dir "$RUNNER_TEMP/release"
           unzip -q "$RUNNER_TEMP"/release/*.zip -d "$RUNNER_TEMP/release"
           helper="$RUNNER_TEMP/release/Meltype-linux/mozc/meltype_mozc_helper"
           chmod +x "$helper"

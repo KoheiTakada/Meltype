@@ -1,6 +1,6 @@
 # Meltype for Android — 日英自動判別対応の試作版
 
-Android用の仮想キーボード（IME）。日本語QWERTYでは **日英自動判別が実装済み**。既存のC# `Meltype.Core` を **NativeAOT + JNI** で共有し、Kotlinで判別ロジックを再実装していません。12キーのかな／英字フリック入力は既存のKotlinエンジンを継続使用します。
+Android用の仮想キーボード（IME）。日本語QWERTYでは **日英自動判別が実装済み**。既存のC# `Meltype.Core` を **NativeAOT + JNI** で共有し、Kotlinで判別ロジックを再実装していません。PR #1149 は QWERTY 専用です。12キーのかな／英字フリック入力は選択できず、体験設計とCore統合を [Issue #1885](https://github.com/yksr-melt/Meltype/issues/1885) で検討します。
 
 このブランチは、[ninjin0802さんのAndroid試作PR #621](https://github.com/yksr-melt/Meltype/pull/621) を土台にした [本家向け統合PR #1149](https://github.com/yksr-melt/Meltype/pull/1149) の提出ソースです。元のAndroid実装への貢献・クレジットを維持し、レビューの一本化を提案しています。正式リリースではなく、実機検証済みの開発・QA版です。
 
@@ -8,18 +8,18 @@ Android用の仮想キーボード（IME）。日本語QWERTYでは **日英自�
 
 - **日英自動判別（日本語QWERTY）**: キーを手動で切り替えずに日本語・英語・混在テキストを入力。判別と未確定文字の処理はC# Coreを共有。
 - **ライブ変換・候補バー**: かな漢字変換はローカルのOSS版Mozcを使用。変換候補か予測候補を表示・選択。空白で変換した文が複数の文節に分かれたときは、候補のタップで先頭の文節から順に選び直せる（最後の文節のタップで確定）。
-- **入力配列**: 日本語QWERTY、かな12キーフリック、英字QWERTY、英字12キーフリック、2ページの数字・記号配列。日本語QWERTYに `、` `。` の専用キーを残し、`!` `?` も入力可能。日本語QWERTYで打つ記号の全角・半角は共有Coreが決める（Macと同じく、日本語の後ろの `?` `!` は全角）。
-- **配列切り替え**: QWERTYではスペースを長押しし、押した位置の吹き出しを上下スワイプして指を離すと日本語／英語を選択。12キーの入力方式は引き続き独立。
+- **入力配列**: 日本語QWERTY、英字QWERTY、2ページの数字・記号配列。日本語QWERTYに `、` `。` の専用キーを残し、`!` `?` も入力可能。
+- **配列切り替え**: QWERTYではスペースを長押しし、押した位置の吹き出しを上下スワイプして指を離すと日本語／英語を選択。12キー・フリックはこのPRでは未実装。
 - **画面適応**: 画面の論理幅・高さ・アスペクト比でキー寸法と分割配列を決定。中央テンキーは幅と高さに十分な余裕がある画面だけ表示。縦横回転と折りたたみ端末に対応。
-- **操作・設定**: 触覚フィードバック、絵文字パネル、候補の選択、日本語入力時のスペースの全角・半角（共有Coreの設定）、ライブ変換のオン／オフ。設定は上から下へスクロールする1画面で、選ぶ項目はその場のプルダウン、オン・オフはスイッチ。
+- **操作・設定**: 触覚フィードバック、絵文字パネル、候補の選択、全角・半角スペース、ライブ変換のオン／オフ。設定画面はシステムバー余白と戻る操作に対応。
+- **障害時の退避**: Coreの初期化・応答処理に失敗した場合は未確定文字を保護し、Android標準のIME選択画面を直接開ける最小限の退避UIを表示する。通常のキーボードには独自のIME切り替えボタンを設けない。IMEサービス自体が起動できない場合は、OSが提供するIME切り替え機能を使用する。
 
 ## 対応範囲と未対応機能
 
 | 対象 | 状態 |
 | --- | --- |
 | 日本語QWERTYでの日英自動判別 | **実装済み**。C# `Meltype.Core` を使用 |
-| かな／英字12キーフリック | 実装済み。Kotlinの既存エンジンを使用 |
-| フリック配列での日英自動判別 | 未対応（今回の対象外） |
+| かな／英字12キーフリック | **未提供**。選択UIを撤去し、[Issue #1885](https://github.com/yksr-melt/Meltype/issues/1885) で体験設計・Core統合を検討 |
 | 読みから英単語を直接推薦する独立機能（`ぐーぐる` → `Google` 等） | 未対応。QWERTYの日英自動判別とは別機能 |
 | ユーザー辞書・個人情報の登録と補完（個人版） | Android独自の画面・表示。NativeAOT Coreのuserdict.txtを使用 |
 | 全端末・全アプリでの互換性、TalkBack対応 | 未検証／保証なし |
@@ -61,7 +61,7 @@ Android用の仮想キーボード（IME）。日本語QWERTYでは **日英自�
 cd android
 bash tools/build-mozc.sh
 ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" bash tools/build-meltype-native.sh
-./gradlew :engine:test :app:testDebugUnitTest :app:assembleDebug
+./gradlew :app:testDebugUnitTest :app:assembleDebug
 ```
 
 Android APK: `android/app/build/outputs/apk/debug/app-debug.apk`。端末テストには別途Androidのテスト用APKとエミュレーター／実機が必要です。
@@ -73,7 +73,6 @@ MozcのJNI／辞書成果物やC# NativeAOTの生成物、配布署名鍵はソ�
 | パス | 役割 |
 | --- | --- |
 | `android/app/` | Android IME・画面・設定・候補バー・C JNIブリッジ |
-| `android/engine/` | フリックと従来入力用のKotlinエンジン |
 | `android/mozc/` | ローカルMozcのJNIと辞書 |
 | `src/Meltype.Core/` | Windows等と共有するC#日英判別・未確定文字の処理 |
 | `android/tools/build-meltype-native.sh` | C# NativeAOTのAndroid向けビルド |

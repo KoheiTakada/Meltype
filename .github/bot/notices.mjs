@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Yukishiro
 //
-// ソースファイルの先頭のライセンス・著作権の表記を確かめる bot (.github/workflows/notices.yml から呼ぶ)。
+// ソースファイルの先頭のライセンス・著作権の表記を確かめるチェック (.github/workflows/quality.yml の notices から呼ぶ)。
 //   - Pull Request で新しく足したソースファイルに `SPDX-License-Identifier` と `Copyright (C) <年> <名前>` があるか
 //   - 作者 (yksr-melt) 以外の人が、Yukishiro (雪代) の名義で著作権の行を書いていないか
 //     (貢献の著作権は貢献した人に残る: CONTRIBUTING.md の CLA。自分の名前で書いてもらう)
-// 見つけたら Pull Request にコメントする (直ったらコメントを「直りました」に書き換える)。
-// Pull Request のコードは動かさない。GitHub の API で、変更 (patch) の足された行を文字列として読むだけ。
+// 見つけたらファイルに注釈 (annotation) を付け、Summary に直し方を出して、チェックを失敗にする。
+// GitHub の API で、変更 (patch) の足された行を文字列として読むだけ (書き込みの権限は要らない)。
 import fs from 'node:fs';
 
 const api = process.env.GITHUB_API_URL ?? 'https://api.github.com';
 const repo = process.env.GITHUB_REPOSITORY;
 const token = process.env.GITHUB_TOKEN;
 
-const Marker = '<!-- meltype-bot --><!-- notices -->';
 /** Yukishiro 名義で書いてよい人 (作者)。 */
 const Owners = ['yksr-melt'];
 /** 先頭に表記を書くソースファイル。辞書・文書・設定ファイル・画像は見ない。 */
@@ -53,10 +52,12 @@ const code = text => '`' + String(text ?? '').replace(/`/g, 'ˋ') + '`';
 
 const copyrightOf = line => /copyright\s*(\(c\)|©)?\s*\d{4}/i.test(line) ? line.replace(/^[\s#/;*!<>-]*(rem\s+)?/i, '').trim() : null;
 
-function check(files, author) {
+function check(files, author, verifiedImports = new Set()) {
   const findings = [];
   const isOwner = Owners.some(o => o.toLowerCase() === author.toLowerCase());
   for (const file of files) {
+    // The exact upstream blob carries its original author's copyright.
+    if (verifiedImports.has(file.filename)) continue;
     if (!SourceFile.test(file.filename)) continue;
     const added = addedLines(file.patch);
     if (file.status === 'added') {
@@ -94,29 +95,49 @@ function message(findings, author) {
     '// Copyright (C) 2026 あなたの名前',
     '```',
     '',
-    '直して push すると、このコメントは自動で書き換わります。',
+    '直して push すると、このチェックが通ります。',
   ].join('\n');
 }
 
-async function upsert(number, body) {
-  const comments = await gh('GET', `/issues/${number}/comments?per_page=100`) ?? [];
-  const mine = comments.find(c => c.user?.type === 'Bot' && c.body?.includes(Marker));
-  if (!body) {
-    // 直った: 前に指摘していたら、直ったことを書く (指摘が無かったなら何もしない)
-    if (mine && !mine.body.includes('✅')) await gh('PATCH', `/issues/comments/${mine.id}`, { body: `${Marker}\n✅ ライセンス・著作権の表記を確認しました。ありがとうございます。` });
-    return;
-  }
-  if (mine) await gh('PATCH', `/issues/comments/${mine.id}`, { body: `${Marker}\n${body}` });
-  else await gh('POST', `/issues/${number}/comments`, { body: `${Marker}\n${body}` });
+/** ワークフローのコマンドの値・プロパティに入れられるようにする (https://github.com/actions/toolkit/blob/main/packages/core/src/command.ts)。 */
+const escapeData = text => text.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+const escapeProperty = text => escapeData(text).replace(/:/g, '%3A').replace(/,/g, '%2C');
+
+/**
+ * In a fork, unchanged source files imported from the official upstream main
+ * retain their upstream author's attribution. Verify each added file by blob SHA;
+ * a rewritten file, a new file, or an unreachable upstream tree is still checked.
+ */
+async function originalUpstreamImports(files) {
+  if (!repo || repo.toLowerCase() === 'yksr-melt/meltype') return new Set();
+  const candidates = files.filter(file => file.status === 'added' &&
+    SourceFile.test(file.filename) && addedLines(file.patch).some(line => {
+      const copyright = copyrightOf(line);
+      return copyright && OwnerName.test(copyright);
+    }));
+  if (candidates.length === 0) return new Set();
+  // Use the actual public repository tree, not a file name or a declaration in a PR.
+  const upstream = await gh('GET', `${api}/repos/yksr-melt/Meltype/git/trees/main?recursive=1`);
+  if (!upstream || upstream.truncated || !Array.isArray(upstream.tree)) return new Set();
+  const original = new Map(upstream.tree.filter(entry => entry.type === 'blob')
+    .map(entry => [entry.path, entry.sha]));
+  return new Set(candidates.filter(file => original.get(file.filename) === file.sha)
+    .map(file => file.filename));
 }
 
 async function main() {
   const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const pr = event.pull_request;
   const author = pr.user.login;
-  const findings = check(await changedFiles(pr.number), author);
-  for (const f of findings) console.log(`${f.file}: ${f.problems.join(' / ')}`);
-  await upsert(pr.number, findings.length ? message(findings, author) : null);
+  const files = await changedFiles(pr.number);
+  const verified = await originalUpstreamImports(files);
+  const findings = check(files, author, verified);
+  if (!findings.length) return;
+  for (const f of findings) {
+    for (const problem of f.problems) console.log(`::error file=${escapeProperty(f.file)},line=1::${escapeData(problem)}`);
+  }
+  fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY ?? '/dev/stdout', message(findings, author) + '\n');
+  process.exitCode = 1;
 }
 
 /** node .github/bot/notices.mjs --self-test: 判定だけを確かめる (GitHub には何も書かない)。 */

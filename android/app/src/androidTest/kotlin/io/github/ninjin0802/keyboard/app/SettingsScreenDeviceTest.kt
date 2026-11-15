@@ -93,7 +93,7 @@ class SettingsScreenDeviceTest {
         val activity = open()
         try {
             val shown = page(activity)
-            val order = listOf("言語", "日本語", "English", "設定", "振動", "12キーのトグル入力", "ライブ変換",
+            val order = listOf("言語", "日本語", "English", "設定", "振動", "ライブ変換",
                 "絵文字", "日本語入力時のスペース", "クリップボード", "履歴の保存期間", "辞書", "ユーザー辞書",
                 "個人情報", "メール・電話・住所", "このアプリについて", "ライセンス",
                 "別のキーボードに切り替える", "Androidのキーボード設定を開く")
@@ -112,21 +112,46 @@ class SettingsScreenDeviceTest {
         }
     }
 
+    @Test fun languageSettingsOfferOnlyJapaneseAndEnglishQwerty() {
+        val activity = open()
+        try {
+            instrumentation.runOnMainSync {
+                val label = findText(activity.window.decorView, "言語")
+                    ?: throw AssertionError("Languages category missing")
+                ((label.parent as View).parent as View).performClick()
+                val root = activity.window.decorView
+                val japanese = findText(root, "QWERTY（ローマ字）")
+                val english = findText(root, "QWERTY")
+                assertNotNull("Japanese QWERTY must be shown", japanese)
+                assertNotNull("English QWERTY must be shown", english)
+                assertTrue("Flick layouts must not be offered in #1149",
+                    findText(root, "12キー（フリック）") == null &&
+                    findText(root, "12-key flick") == null)
+                assertFalse("Japanese layout is fixed, not selectable",
+                    ((japanese!!.parent as View).parent as View).hasOnClickListeners())
+                assertFalse("English layout is fixed, not selectable",
+                    ((english!!.parent as View).parent as View).hasOnClickListeners())
+            }
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
     @Test fun launcherAlwaysOffersEscapeWhenTheInputMethodCannotStart() {
         val activity = open()
         try {
             instrumentation.runOnMainSync {
                 val root = activity.window.decorView
                 val picker = findText(root, "別のキーボードに切り替える")
-                val systemSettings = findText(root, "Androidのキーボード設定を開く")
-                assertNotNull("System IME picker must be reachable without launching the IME",
+                assertNotNull("System IME picker remains a last resort if the IME process cannot start",
                     picker)
-                assertNotNull("Android keyboard settings must remain reachable independently",
-                    systemSettings)
                 val pickerRow = (picker!!.parent as View).parent as View
-                val settingsRow = (systemSettings!!.parent as View).parent as View
                 assertTrue(pickerRow.hasOnClickListeners())
-                assertTrue(settingsRow.hasOnClickListeners())
+                // Emergency switching must not require opening a Settings screen.
+                // Onboarding can still show Android setup before Meltype is enabled.
+                if (findText(root, "Meltypeを有効にする") == null) {
+                    assertTrue(findText(root, "Androidのキーボード設定を開く") == null)
+                }
             }
         } finally {
             instrumentation.runOnMainSync { activity.finish() }
@@ -155,60 +180,19 @@ class SettingsScreenDeviceTest {
         }
     }
 
-    @Test fun settingsAreSwitchesAndToggleWaitFollowsTheToggle() {
-        val settings = Settings(instrumentation.targetContext)
-        val previous = settings.toggleEnabled
+    @Test fun generalSettingsExposeOnlySupportedQwertyOptions() {
         val activity = open()
         try {
             instrumentation.runOnMainSync {
+                val shown = texts(activity.window.decorView)
                 val titles = allSwitches(activity.window.decorView).map { it.contentDescription.toString() }
-                assertEquals(listOf("振動", "12キーのトグル入力", "ライブ変換", "絵文字"), titles)
-                val toggle = allSwitches(activity.window.decorView).single { it.contentDescription == "12キーのトグル入力" }
-                if (toggle.isChecked()) toggle.setChecked(false)
+                assertEquals(listOf("振動", "ライブ変換", "絵文字"), titles)
+                assertFalse("12キー is not yet supported by Core",
+                    "12キーのトグル入力" in shown || "トグル判定時間" in shown)
+                assertTrue("The QWERTY space-width choice remains available",
+                    "日本語入力時のスペース" in shown)
             }
-            instrumentation.waitForIdleSync()
-            assertFalse("トグル判定時間 is shown while toggle input is off", "トグル判定時間" in page(activity))
-            instrumentation.runOnMainSync {
-                allSwitches(activity.window.decorView).single { it.contentDescription == "12キーのトグル入力" }.setChecked(true)
-            }
-            instrumentation.waitForIdleSync()
-            val shown = page(activity)
-            val wait = shown.indexOf("トグル判定時間")
-            assertTrue("トグル判定時間 is not shown while toggle input is on: $shown", wait >= 0)
-            // Right below the toggle (its title and description come first), before the next setting.
-            assertTrue(wait > shown.indexOf("12キーのトグル入力") && wait < shown.indexOf("ライブ変換"))
-            assertTrue(settings.toggleEnabled)
         } finally {
-            settings.toggleEnabled = previous
-            instrumentation.runOnMainSync { activity.finish() }
-        }
-    }
-
-    @Test fun choicesOpenAsDropDownsOnTheSamePage() {
-        val settings = Settings(instrumentation.targetContext)
-        val previous = settings.japaneseLayout
-        val activity = open()
-        try {
-            instrumentation.runOnMainSync { rowOf(activity, "日本語").performClick() }
-            instrumentation.waitForIdleSync()
-            instrumentation.runOnMainSync {
-                val menu = activity.openDropdownForTest
-                assertNotNull("The row opens a drop-down menu", menu)
-                assertEquals(listOf("QWERTY（ローマ字）", "12キー（フリック）"), menu!!.labels)
-                assertTrue("The list is open", menu.isShowing)
-                assertEquals(if (previous == LayoutId.ROMAJI) 0 else 1, menu.selected)
-                // Still the same page: the choice did not open another one.
-                assertNotNull(findText(activity.window.decorView, "Meltype の設定"))
-                val other = if (previous == LayoutId.ROMAJI) 1 else 0
-                menu.pick(other)
-            }
-            instrumentation.waitForIdleSync()
-            val chosen = if (previous == LayoutId.ROMAJI) LayoutId.KANA else LayoutId.ROMAJI
-            assertEquals(chosen, Settings(activity).japaneseLayout)
-            assertTrue("The row shows the new choice",
-                (if (chosen == LayoutId.ROMAJI) "QWERTY（ローマ字）" else "12キー（フリック）") in page(activity))
-        } finally {
-            settings.japaneseLayout = previous
             instrumentation.runOnMainSync { activity.finish() }
         }
     }
@@ -241,21 +225,17 @@ class SettingsScreenDeviceTest {
         }
     }
 
-    @Test fun systemBarsAreRespectedWhenThePageIsDrawnAgain() {
+    @Test fun systemBarsAreRespectedAfterSpaceWidthRedraw() {
         val settings = Settings(instrumentation.targetContext)
-        val previous = settings.toggleEnabled
+        val previous = settings.japaneseSpaceFullWidth
         val activity = open()
         try {
-            // Explicit synthetic insets make this regression reproducible on
-            // pre-edge-to-edge API29 as well as Android 15+ devices.
             val insets = WindowInsets.Builder()
                 .setSystemWindowInsets(Insets.of(0, 68, 0, 28))
                 .build()
             fun assertProtected() {
                 val root = activity.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
                 if (Build.VERSION.SDK_INT >= 35) {
-                    // Check the real Android 15+ inset as well: the screenshot
-                    // regression occurred because the title was under the clock.
                     val statusTop = root.rootWindowInsets?.getInsets(
                         WindowInsets.Type.statusBars())?.top ?: 0
                     assertTrue("Emulator must expose a visible status bar", statusTop > 0)
@@ -268,15 +248,18 @@ class SettingsScreenDeviceTest {
             }
             instrumentation.runOnMainSync {
                 assertProtected()
-                // Switching toggle input draws the page again.
-                allSwitches(activity.window.decorView).single { it.contentDescription == "12キーのトグル入力" }.let {
-                    it.setChecked(!it.isChecked())
-                }
+                // Changing the space width re-renders the supported QWERTY settings page.
+                rowOf(activity, "日本語入力時のスペース").performClick()
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                val menu = activity.openDropdownForTest!!
+                menu.pick(if (previous) 0 else 1)
             }
             instrumentation.waitForIdleSync()
             instrumentation.runOnMainSync { assertProtected() }
         } finally {
-            settings.toggleEnabled = previous
+            settings.japaneseSpaceFullWidth = previous
             instrumentation.runOnMainSync { activity.finish() }
         }
     }

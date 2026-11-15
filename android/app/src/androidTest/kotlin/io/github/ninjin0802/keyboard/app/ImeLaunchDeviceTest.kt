@@ -6,6 +6,9 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.view.MotionEvent
 import android.view.InputDevice
+import android.view.View
+import android.view.ViewGroup
+import io.github.ninjin0802.keyboard.app.input.Direction
 import android.view.inputmethod.InputMethodManager
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.ninjin0802.keyboard.app.layout.KeyAction
@@ -103,11 +106,13 @@ class ImeLaunchDeviceTest {
     ): Boolean {
         val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
             as InputMethodManager
-        val service = KeyboardService.activeForSmokeTest?.get()
-        val keys = service?.activeKeysForSmokeTest()
+        val service = KeyboardService.activeForSmokeTest?.get() ?: return false
+        val keys = service.activeKeysForSmokeTest() ?: return false
         return activity.hasWindowFocus() && editor.hasFocus() &&
-            imm.isActive(editor) && service?.isInputViewShown == true &&
-            keys != null && keys.layout.id == expectedLayout &&
+            imm.isActive(editor) && service.isInputViewShown &&
+            service.currentInputConnection != null &&
+            (editor.id == View.NO_ID || service.currentInputEditorInfo?.fieldId == editor.id) &&
+            keys.layout.id == expectedLayout &&
             keys.isAttachedToWindow && keys.isShown && keys.width > 100 && keys.height > 100
     }
 
@@ -168,6 +173,96 @@ class ImeLaunchDeviceTest {
             isImeReadyFor(activity, editor,
                 io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI)
         }
+    }
+
+    private fun findImePicker(view: View): View? {
+        if (view.contentDescription == "別のキーボードに切り替える") return view
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                findImePicker(view.getChildAt(i))?.let { return it }
+            }
+        }
+        return null
+    }
+
+    /** Normal typing shows no extra switch button; recovery offers direct system IME selection. */
+    @Test fun keyboardProvidesImePickerOnlyInEmergency() = withRomajiActivity { activity ->
+        focusJapanese(activity, activity.japaneseEditor)
+        val service = KeyboardService.activeForSmokeTest?.get()
+            ?: throw AssertionError("Keyboard service missing")
+        instrumentation.runOnMainSync {
+            val root = service.window?.window?.decorView
+                ?: throw AssertionError("IME window not available")
+            assertTrue("Normal keyboard must not add a custom IME switch button",
+                findImePicker(root) == null)
+
+            val emergency = service.emergencyKeyboardForSmokeTest()
+            val picker = findImePicker(emergency)
+            assertNotNull("Emergency view must offer direct system IME selection", picker)
+            assertTrue("Emergency picker must be clickable", picker!!.isClickable)
+
+            fun containsSettingsLink(v: View): Boolean =
+                (v is android.widget.TextView && v.text.contains("キーボード設定")) ||
+                    (v is ViewGroup && (0 until v.childCount).any { containsSettingsLink(v.getChildAt(it)) })
+            assertTrue("Recovery must not send the user to a settings screen",
+                !containsSettingsLink(emergency))
+        }
+    }
+
+    /** A non-converting email editor still accepts literal keys if Japanese QWERTY is selected. */
+    @Test fun emailFieldAcceptsLiteralRomajiAfterLanguageSwitch() = withRomajiActivity { activity ->
+        requestKeyboard(activity, activity.editor)
+        waitUntil(
+            "English QWERTY in email editor", millis = 45_000,
+            retryEveryMillis = 2_000, retry = { requestKeyboard(activity, activity.editor) },
+            describe = { describeImeState(activity) },
+        ) {
+            activity.editor.hasFocus() &&
+                KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()?.layout?.id ==
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY
+        }
+
+        // The space-bar language popup and this key action both use the same
+        // screen navigation. Avoid depending on long-press gesture timing.
+        val service = KeyboardService.activeForSmokeTest?.get()
+            ?: throw AssertionError("Keyboard service missing")
+        instrumentation.runOnMainSync {
+            service.onKey(KeyAction.Language, Direction.TAP, SystemClock.uptimeMillis())
+        }
+        waitUntil("Japanese QWERTY after language switch",
+            describe = { describeImeState(activity) + ", selected=" + service.activeKeysForSmokeTest()?.layout?.id }) {
+            activity.editor.hasFocus() &&
+                service.activeKeysForSmokeTest()?.layout?.id ==
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI
+        }
+        // Android can restart input in the same editor after showing the IME.
+        // A restart must not reset the language that the user just selected.
+        requestKeyboard(activity, activity.editor)
+        waitUntil(
+            "Japanese QWERTY survives the same editor restart",
+            millis = 45_000,
+            retryEveryMillis = 2_000,
+            retry = { requestKeyboard(activity, activity.editor) },
+            describe = { describeImeState(activity) + ", selected=" + service.activeKeysForSmokeTest()?.layout?.id },
+        ) {
+            isImeReadyFor(activity, activity.editor,
+                io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI)
+        }
+        // Require the editor binding to remain active after the asynchronous restart.
+        repeat(3) {
+            Thread.sleep(200)
+            instrumentation.waitForIdleSync()
+            assertTrue("IME lost restarted editor binding: " + describeImeState(activity),
+                isImeReadyFor(activity, activity.editor,
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI))
+        }
+        val keyboard = service.activeKeysForSmokeTest()
+            ?: throw AssertionError("Japanese keys not shown")
+        tap(keyboard, "a") { it is KeyAction.Romaji && it.char == 'a' }
+        waitUntil("literal romaji key appears in email editor") {
+            activity.editor.text.toString() == "a"
+        }
+        assertEquals("a", activity.editor.text.toString())
     }
 
     /** Runs [block] with the Japanese layout set to QWERTY romaji, the layout that goes through the native Core. */
@@ -244,6 +339,30 @@ class ImeLaunchDeviceTest {
         }
     }
 
+    /** Sending from a button outside the IME must not keep or reinsert unsent composition. */
+    @Test fun externalSendClearsCompositionWithoutReinsertingOldText() = withRomajiActivity { activity ->
+        val editor = activity.japaneseEditor
+        focusJapanese(activity, editor)
+        clear(editor)
+        focusJapanese(activity, editor)
+        typeRomaji("ka")
+        waitUntil("か before external Send", describe = { "text=" + editor.text }) {
+            editor.text.toString() == "か" &&
+                android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text) >= 0
+        }
+        instrumentation.runOnMainSync { activity.sendButton.performClick() }
+        waitUntil("external Send must clear editor and Core composition",
+            describe = { "text=" + editor.text + ", core=" + coreView() }) {
+            editor.hasFocus() && editor.text.isEmpty() && coreView() == null
+        }
+        assertEquals("か", activity.lastSentMessage)
+        typeRomaji("a")
+        waitUntil("next message does not resurrect the previous one", describe = { "text=" + editor.text }) {
+            editor.text.toString() == "あ"
+        }
+        assertEquals("あ", editor.text.toString())
+    }
+
     /** Leaving an editor keeps the composing text there; the next editor starts without it. */
     @Test fun leavingAnEditorCommitsTheCompositionThere() = withRomajiActivity { activity ->
         val japanese = activity.japaneseEditor
@@ -296,30 +415,30 @@ class ImeLaunchDeviceTest {
     }
 
     /**
-     * With the real converter: after Space, a candidate tap chooses it for the selected clause and
-     * moves on to the next clause; the tap on the last clause commits the whole sentence.
+     * On a real Android QWERTY keyboard, Space starts on the Core's final clause.
+     * Tapping an alternate candidate there must commit the full sentence without changing
+     * the earlier clauses. Earlier-clause navigation is separately exercised through Core
+     * key events in CoreEditingDeviceTest.
      */
-    @Test fun candidateTapsFixAConversionClauseByClause() = withRomajiActivity { activity ->
+    @Test fun candidateTapOnFinalClauseKeepsEarlierClausesAndCommits() = withRomajiActivity { activity ->
         val editor = activity.japaneseEditor
         focusJapanese(activity, editor)
         clear(editor)
         focusJapanese(activity, editor)
         typeRomaji("watashinonamaehanakanodesu ")
-        waitUntil("the sentence is converted", describe = { "view=" + coreView() }) { coreView()?.converting == true }
-        val clauses = coreView()!!.clauses.size
-        assertTrue("The sentence was not split into clauses: " + coreView(), clauses >= 2)
-        var expected = ""
-        for (clause in 0 until clauses) {
-            val view = coreView() ?: throw AssertionError("Committed before clause $clause: " + editor.text)
-            assertEquals("Not moved on to clause $clause: $view", clause, view.selectedClause)
-            assertTrue("Not composing at clause $clause: " + editor.text,
-                android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text) >= 0)
-            val label = tapCandidateOtherThan(view.clauses[clause])
-            expected = view.clauses.take(clause).joinToString("") + label + view.clauses.drop(clause + 1).joinToString("")
+        waitUntil("the sentence is converted", describe = { "view=" + coreView() }) {
+            coreView()?.converting == true
         }
-        waitUntil("the sentence is committed as chosen", describe = { "text=" + editor.text + " expected=" + expected }) {
-            editor.text.toString() == expected &&
-                android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text) < 0
+        val view = coreView() ?: throw AssertionError("Core conversion disappeared")
+        assertTrue("The sentence was not split: $view", view.clauses.size >= 2)
+        assertEquals("The Core should select its final clause after Space: $view",
+            view.clauses.lastIndex, view.selectedClause)
+        assertTrue("Not composing: $view", composingStart(editor) >= 0)
+        val chosen = tapCandidateOtherThan(view.clauses.last())
+        val expected = view.clauses.dropLast(1).joinToString("") + chosen
+        waitUntil("the final candidate commits the complete sentence",
+            describe = { "text=" + editor.text + " expected=" + expected }) {
+            editor.text.toString() == expected && composingStart(editor) < 0
         }
     }
 
@@ -500,29 +619,23 @@ class ImeLaunchDeviceTest {
                     io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY)
             }
 
-            for ((index, letter) in listOf('a', 's', 'd').withIndex()) {
-                // Check ownership before every touch; the IME may detach while
-                // Android switches the focused window between test activities.
+            for ((index, letter) in listOf("a", "s", "d").withIndex()) {
+                // The system may recreate the input view after an asynchronous restartInput.
+                // Do not inject against coordinates cached from a detached IME window.
                 waitUntil(
-                    "email editor IME ready before key $letter",
-                    retryEveryMillis = 2_000,
-                    retry = { requestKeyboard(activity, activity.editor) },
+                    "visible English keys before $letter", millis = 45_000,
+                    retryEveryMillis = 2_000, retry = { requestKeyboard(activity, activity.editor) },
                     describe = { describeImeState(activity) },
                 ) {
                     isImeReadyFor(activity, activity.editor,
                         io.github.ninjin0802.keyboard.app.layout.LayoutId.QWERTY)
                 }
-                val keyboard = KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()
-                    ?: throw AssertionError("Keyboard detached before key $letter")
-                tap(keyboard, letter.toString()) {
-                    (it as? KeyAction.Text)?.text == letter.toString()
-                }
-                val expected = "asd".substring(0, index + 1)
-                waitUntil(
-                    "key $letter must enter exactly $expected",
-                    describe = { "text=" + activity.editor.text + " " + describeImeState(activity) },
-                ) {
-                    activity.editor.text.toString() == expected
+                val currentKeys = KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()
+                    ?: throw AssertionError("English keyboard detached before $letter")
+                tap(currentKeys, letter) { it is KeyAction.Text && it.text == letter }
+                waitUntil("key $letter must enter the app's EditText",
+                    describe = { describeImeState(activity) + ", text=" + activity.editor.text }) {
+                    activity.editor.text.toString().length >= index + 1
                 }
             }
             waitUntil("the three visible keys must generate text in the editor") {
@@ -532,17 +645,25 @@ class ImeLaunchDeviceTest {
 
             // Also exercise the normal Japanese-input route. A working email
             // keyboard alone could conceal a failing Japanese/native path.
-            focusJapanese(activity, activity.japaneseEditor)
-            val japanese = KeyboardService.activeForSmokeTest?.get()?.activeKeysForSmokeTest()
-                ?: throw AssertionError("Japanese keys not shown")
-            tap(japanese, "Japanese A") {
-                when (it) {
-                    is KeyAction.Romaji -> it.char == 'a'
-                    is KeyAction.Flick -> it.key.chars.firstOrNull() == 'あ'
-                    else -> false
-                }
+            instrumentation.runOnMainSync {
+                activity.japaneseEditor.requestFocus()
+                (activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                    as InputMethodManager).showSoftInput(
+                        activity.japaneseEditor, InputMethodManager.SHOW_IMPLICIT)
             }
-            waitUntil("Japanese key must write composing text into the editor") {
+            waitUntil("Japanese editor is bound to the native QWERTY keyboard",
+                millis = 45_000, retryEveryMillis = 2_000,
+                retry = { requestKeyboard(activity, activity.japaneseEditor) },
+                describe = { describeImeState(activity) }) {
+                isImeReadyFor(activity, activity.japaneseEditor,
+                    io.github.ninjin0802.keyboard.app.layout.LayoutId.ROMAJI)
+            }
+            val japanese = KeyboardService.activeForSmokeTest?.get()
+                ?.activeKeysForSmokeTest() ?: throw AssertionError("Japanese keys not shown")
+            // Exercise an actual touch, not just the existence of a layout key.
+            tap(japanese, "a") { it is KeyAction.Romaji && it.char == 'a' }
+            waitUntil("Japanese key must write composing text into the editor",
+                describe = { describeImeState(activity) + ", text=" + activity.japaneseEditor.text }) {
                 activity.japaneseEditor.text.isNotEmpty()
             }
             // The Kotlin romaji path would also write text. Require that the key
