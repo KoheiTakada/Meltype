@@ -16,6 +16,11 @@ concurrency:
   group: pr-expectations-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+# Stop when any step in a pipeline fails (upstream main, #1842).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   expectations:
     name: 報告の再現
