@@ -479,6 +479,14 @@ internal static class ImeContractTests
             "入力中のキーの役割を分けるなら、無変換は英字にする\n" + front.Trace);
         front.Key('\n');
         front.Settings.SeparateKeyRoles = false;
+        // 役割を分けなくても、無変換でカタカナを切り替える設定が ON なら、入力中の無変換は確定せず切り替える
+        front.Settings.NonConvertCyclesKana = true;
+        front.Type("ka");
+        var cycle = front.Key(VirtualKeys.NonConvert);
+        Assert.True(front.Open && cycle.GetProperty("result").GetProperty("view").GetProperty("text").GetString() == "カ",
+            "無変換でカタカナ (確定して英数にしない)\n" + front.Trace);
+        front.Key('\n');
+        front.Settings.NonConvertCyclesKana = false;
         // 親指シフトの配列では親指キー (変換ボックスで使う)
         front.Settings.InputStyle = InputStyle.Kana;
         front.Settings.KanaLayout = KanaLayout.Nicola;
@@ -607,6 +615,24 @@ internal static class ImeContractTests
             front.Type("sa");
             Assert.Equal("さ", front.Composition["t1"], "周辺文字列が届かない通常欄では変換する\n" + front.Trace);
         }
+    }
+
+    [Test]
+    public static void Password_OverridesAppRuleThatTreatsFieldAsText()
+    {
+        const string app = "auth-client";
+        var front = new Front { App = app };
+        front.Settings.AppRules.Add(new AppRule { Process = app, TextInput = true });
+        front.Traits.Add("NonText");
+        Assert.True(front.Type("ka").All(Consumed), "アプリ別設定でテキスト欄として受け持つ\n" + front.Trace);
+        Assert.Equal("か", front.Composition["t1"], front.Trace);
+
+        front.Traits.Add("Password");
+        foreach (var key in "aiueo\n")
+        {
+            AssertPasswordPass(front, front.Key(key));
+        }
+        Assert.Equal("aiueo\n", front.Document, "パスワード欄では未確定文字を取り消して打鍵を通す\n" + front.Trace);
     }
 
     [Test]
@@ -851,6 +877,7 @@ internal static class ImeContractTests
         front.Type("tanniwotoru ");
         Assert.Equal("単位を取る", front.Composition["t1"], front.Trace);
         front.Traits.Clear();
+        front.Key(VirtualKeys.Left);
         front.Key(VirtualKeys.Return, shift: true);
         Assert.Equal("単位を", front.Document, front.Trace);
         Assert.Equal("とる", front.Composition["t1"], front.Trace);
