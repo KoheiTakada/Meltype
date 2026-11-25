@@ -15,7 +15,6 @@ android {
         versionCode = System.getenv("MELTYPE_VERSION_CODE")?.toIntOrNull() ?: 1
         versionName = System.getenv("MELTYPE_VERSION_NAME") ?: "0.1.0"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     // Bridge to the existing C# Meltype.Core compiled as Android NativeAOT.
     externalNativeBuild {
@@ -74,7 +73,4 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)
-    // 端末の上のテスト (src/androidTest) を動かすためだけのもの。アプリには入らない。
-    androidTestImplementation(libs.androidx.test.runner)
-    androidTestImplementation(libs.junit)
 }
