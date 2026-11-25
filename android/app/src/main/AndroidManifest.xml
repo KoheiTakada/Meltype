@@ -9,7 +9,7 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- クリップボードの履歴の期限切れを、キーボードを開かない日も消す (ClipboardCleanupJob)。再起動のあとも続ける。 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- 履歴のリンクのプレビュー (OGP) と、翻訳のモデル (ML Kit) を取ってくる。コピーした文字そのものは送らない。 -->
+    <!-- 履歴のリンクのプレビュー (OGP) を取ってくる。コピーした文字そのものは送らない。 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 最近のスクリーンショットを候補に出す。設定で利用者が許可したときだけ読む (RecentScreenshotSource)。 -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />

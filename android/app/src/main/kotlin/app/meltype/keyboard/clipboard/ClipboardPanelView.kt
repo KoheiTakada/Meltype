@@ -130,7 +130,7 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
                 setOnClickListener { onPick?.invoke(item) }
                 setOnLongClickListener {
                     val action = when (item.kind) {
-                        "image" -> "ocr"
+                        "image" -> "copy"
                         "file" -> "copy"
                         else -> "edit"
                     }
@@ -162,11 +162,7 @@ class ClipboardPanelView(context: Context) : LinearLayout(context) {
                 gravity = Gravity.END or Gravity.CENTER_VERTICAL
                 val buttons = ArrayList<Pair<String, String>>()
                 buttons += "copy" to "コピー"
-                if (!item.isMedia) {
-                    buttons += "edit" to "編集"
-                    buttons += "translate" to "翻訳"
-                }
-                if (item.kind == "image") buttons += "ocr" to "OCR"
+                if (!item.isMedia) buttons += "edit" to "編集"
                 if (item.kind == "link" &&
                     ClipboardLinkPreviewLoader.stripParameters(item.text) != item.text) {
                     buttons += "clean" to "URLのパラメータを除去"

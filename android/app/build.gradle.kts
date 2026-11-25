@@ -66,10 +66,6 @@ kotlin {
 
 dependencies {
     implementation(project(":mozc"))
-    // クリップボードの履歴の文字の読み取り (日本語 OCR)・翻訳・言語の判定。端末の中で処理する (翻訳のモデルだけ初回に取ってくる)。
-    implementation(libs.mlkit.text.recognition.japanese)
-    implementation(libs.mlkit.translate)
-    implementation(libs.mlkit.language.id)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)

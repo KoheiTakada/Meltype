@@ -46,7 +46,6 @@ import app.meltype.keyboard.clipboard.ClipboardLinkPreviewLoader
 import app.meltype.keyboard.clipboard.ClipboardPanelView
 import app.meltype.keyboard.clipboard.ClipboardPill
 import app.meltype.keyboard.clipboard.ClipboardPillGate
-import app.meltype.keyboard.clipboard.ClipboardProcessing
 import app.meltype.keyboard.clipboard.HistoryClip
 import app.meltype.keyboard.clipboard.RecentScreenshotSource
 import app.meltype.keyboard.core.CaretWatch
@@ -1044,25 +1043,6 @@ class KeyboardService : InputMethodService(), KeyListener {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     .putExtra(ClipboardEditorActivity.EXTRA_ID, clip.id))
                 closeClipboardPanel()
-            }
-            "translate" -> ClipboardProcessing.translate(clip.text, ::saveProcessedClipboard)
-            "ocr" -> ClipboardProcessing.ocr(this, clip, ::saveProcessedClipboard)
-        }
-    }
-
-    /** 翻訳・文字の読み取りの結果は、履歴に足す (いまの入力欄には入れない)。 */
-    private fun saveProcessedClipboard(result: Result<String>) {
-        if (clipboardWorker.isShutdown) return
-        val text = result.getOrNull()
-        if (text == null) {
-            notice("処理できませんでした（言語・画像・モデルを確認）")
-            return
-        }
-        clipboardTask {
-            clipboardStore.saveText(text)
-            mainHandler.post {
-                notice("結果をクリップボード履歴に保存しました")
-                refreshClipboardPanel()
             }
         }
     }

@@ -47,9 +47,7 @@ class ClipboardIconView(
             "copy" -> R.drawable.ms_content_copy
             "edit" -> R.drawable.ms_edit
             "delete" -> R.drawable.ms_delete
-            "ocr" -> R.drawable.ms_document_scanner
             "clean" -> R.drawable.ms_format_clear
-            "translate" -> R.drawable.ms_translate
             else -> R.drawable.ms_notes
         }
     }

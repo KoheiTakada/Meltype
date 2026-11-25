@@ -35,13 +35,6 @@
 - ライセンス: Apache License 2.0（https://www.apache.org/licenses/LICENSE-2.0）
 - 著作権表示: Copyright 2022 Google LLC
 
-## ML Kit
-
-- 名前: ML Kit の日本語の文字認識（`com.google.mlkit:text-recognition-japanese`）、翻訳（`com.google.mlkit:translate`）、言語の判定（`com.google.mlkit:language-id`）と、それが依存する Google Play services・AndroidX のライブラリ
-- 入手元: https://developers.google.com/ml-kit
-- 使っているもの: クリップボード履歴の画像の文字の読み取りと翻訳
-- ライセンス: ML Kit の利用規約（https://developers.google.com/ml-kit/terms）。依存する AndroidX のライブラリは Apache License 2.0
-
 ## Unicode の絵文字の一覧
 
 - 名前: Unicode Emoji 18.0 の `emoji-test.txt`（Emoji Keyboard/Display Test Data for UTS #51、Date: 2026-04-30）
