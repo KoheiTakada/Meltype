@@ -16,6 +16,12 @@ on:
         required: true
         default: 3c8a22a581eeb531b58150f37e20690feda308fe
         type: string
+      qa_gate:
+        description: 'device = 同じコミットの端末 QA の成功が要る / unit = このワークフローの単体テストだけで公開する（端末テストを持たない本家ベースの版）'
+        required: false
+        default: device
+        type: choice
+        options: [device, unit]
 
 permissions:
   contents: write
@@ -90,6 +96,7 @@ jobs:
         id: source
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Require passing full Android QA on this exact source commit
+        if: inputs.qa_gate != 'unit'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
@@ -146,6 +153,20 @@ jobs:
             tasks=(:engine:test "${tasks[@]}")
           fi
           ./gradlew --no-daemon "${tasks[@]}"
+      # 本家ベースの版は Gradle で署名せず app-release-unsigned.apk を作る。そのときだけ配布用の鍵で署名する。
+      - name: Sign an unsigned release APK with the permanent key
+        env:
+          MELTYPE_SIGNING_PASSWORD: ${{ secrets.MELTYPE_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          out=android/app/build/outputs/apk/release
+          if test ! -f "$out/app-release.apk" && test -f "$out/app-release-unsigned.apk"; then
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
+              --ks "$RUNNER_TEMP/Meltype-signing.p12" --ks-type PKCS12 --ks-key-alias meltype \
+              --ks-pass env:MELTYPE_SIGNING_PASSWORD --key-pass env:MELTYPE_SIGNING_PASSWORD \
+              --out "$out/app-release.apk" "$out/app-release-unsigned.apk"
+          fi
+          test -f "$out/app-release.apk"
       - name: Verify Android 16 KiB ELF and APK alignment
         run: python3 android/tools/check-apk-16k.py android/app/build/outputs/apk/release/app-release.apk
       - name: Verify package and signing certificate
@@ -194,6 +215,7 @@ jobs:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           VERSION_NUMBER: ${{ github.run_number }}
           PUBLISH_PR1149: ${{ contains(github.event.head_commit.message, '[publish-pr1149]') }}
+          QA_GATE: ${{ inputs.qa_gate || 'device' }}
         run: |
           set -euo pipefail
           # A distinct prerelease and filename keep the upstream PR build separate
@@ -206,6 +228,11 @@ jobs:
             gh release create "$tag" android/build/distribution/Meltype-upstream-PR1149.apk#Meltype-upstream-PR1149.apk android/build/distribution/Meltype.sha256#Meltype.sha256 --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --title "$title" --notes-file android/build/distribution/RELEASE-NOTES.md --prerelease
           else
             tag="android-v0.1.$VERSION_NUMBER"
-            printf 'Meltype Android personal edition from %s\nSigned with the permanent Meltype key (matches v0.1.10/v0.1.11).\nPackage ID: app.meltype.keyboard\nSource verified in exact-SHA Android 15/17 QA before release.\n' "$SOURCE_SHA" > android/build/distribution/RELEASE-NOTES.md
+            if [[ "$QA_GATE" == "unit" ]]; then
+              verified='Source passed the JVM unit tests in this workflow; no device QA was run.'
+            else
+              verified='Source verified in exact-SHA Android 15/17 QA before release.'
+            fi
+            printf 'Meltype Android personal edition from %s\nSigned with the permanent Meltype key (matches v0.1.10/v0.1.11).\nPackage ID: app.meltype.keyboard\n%s\n' "$SOURCE_SHA" "$verified" > android/build/distribution/RELEASE-NOTES.md
             gh release create "$tag" android/build/distribution/Meltype.apk#Meltype.apk android/build/distribution/Meltype.sha256#Meltype.sha256 --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --title "Meltype Android 0.1.$VERSION_NUMBER" --notes-file android/build/distribution/RELEASE-NOTES.md --prerelease
           fi
