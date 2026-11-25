@@ -12,11 +12,13 @@ import android.view.View
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
+import app.meltype.keyboard.clipboard.ClipboardPill
 import app.meltype.keyboard.core.DisplayCandidate
 
 /** 変換候補を横に並べる。高さは候補が空でも変わらない（縦画面 44dp、横画面 36dp）。 */
 class CandidateBarView(context: Context) : HorizontalScrollView(context) {
     var onPick: ((index: Int) -> Unit)? = null
+    var onClipboardPick: (() -> Unit)? = null
 
     private var palette = Palette.of(context)
     private val density = resources.displayMetrics.density
@@ -28,6 +30,7 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
     }
     private var shown: List<DisplayCandidate> = emptyList()
     private var shownSelected: Int? = null
+    private var clipboard: ClipboardPill? = null
 
     init {
         isHorizontalScrollBarEnabled = false
@@ -37,6 +40,22 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
                    (10*density).toInt(), (8*density).toInt())
         clipToPadding = false
         addView(row, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
+    }
+
+    /** 最近コピーしたものを、候補が無いあいだだけ出す。null なら出さない。 */
+    fun showClipboard(pill: ClipboardPill?) {
+        if (pill == clipboard) return
+        clipboard = pill
+        if (shown.isEmpty()) {
+            row.removeAllViews()
+            addClipboard()
+        }
+    }
+
+    private fun addClipboard() {
+        val pill = clipboard ?: return
+        row.addView(pill.view(context, palette) { onClipboardPick?.invoke() },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT))
     }
 
     fun show(candidates: List<DisplayCandidate>, selected: Int?) {
@@ -66,12 +85,13 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
                 lp.marginEnd = (3*density).toInt()
                 row.addView(tv, lp)
             }
+            if (candidates.isEmpty()) addClipboard()
             // 並びが変わったら先頭から見せる（前の並びを横に送った位置のままだと、第一候補が隠れる）。
             scrollTo(0, 0)
         }
         shown = candidates
         shownSelected = selected
-        for (i in 0 until row.childCount) {
+        for (i in candidates.indices) {
             val tv = row.getChildAt(i) as TextView
             val on = i == selected
             // Suggestions are text directly on the translucent IME surface.

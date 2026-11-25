@@ -7,6 +7,14 @@
         すべてのデータを外す規則も付ける（Android 12 以降は dataExtractionRules、それより前は fullBackupContent）。
     -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- クリップボードの履歴の期限切れを、キーボードを開かない日も消す (ClipboardCleanupJob)。再起動のあとも続ける。 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 履歴のリンクのプレビュー (OGP) と、翻訳のモデル (ML Kit) を取ってくる。コピーした文字そのものは送らない。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 最近のスクリーンショットを候補に出す。設定で利用者が許可したときだけ読む (RecentScreenshotSource)。 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -28,6 +36,20 @@
         <activity
             android:name=".LicensesActivity"
             android:exported="false" />
+        <activity
+            android:name=".clipboard.ClipboardEditorActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <!-- 履歴の画像・ファイルを、受け取れる入力欄に貼り付けるときだけ、読み取りの権限を渡す。 -->
+        <provider
+            android:name=".clipboard.ClipboardContentProvider"
+            android:authorities="${applicationId}.clipboard"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+        <service
+            android:name=".clipboard.ClipboardCleanupJob"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="true" />
         <!-- BIND_INPUT_METHOD は、このサービスをシステムだけが呼べるようにする属性。権限の要求ではない。 -->
         <service
             android:name=".KeyboardService"

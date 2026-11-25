@@ -2,8 +2,19 @@
 // Copyright (C) 2026 ninjin0802
 package app.meltype.keyboard
 
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.SharedPreferences
+import android.database.ContentObserver
+import android.database.SQLException
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.provider.MediaStore
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputContentInfo
+import android.widget.Toast
 import android.graphics.Color
 import android.content.Intent
 import android.widget.TextView
@@ -26,6 +37,18 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.view.Gravity
+import app.meltype.keyboard.clipboard.ClipboardCleanupJob
+import app.meltype.keyboard.clipboard.ClipboardContentProvider
+import app.meltype.keyboard.clipboard.ClipboardEditorActivity
+import app.meltype.keyboard.clipboard.ClipboardHistoryStore
+import app.meltype.keyboard.clipboard.ClipboardIconView
+import app.meltype.keyboard.clipboard.ClipboardLinkPreviewLoader
+import app.meltype.keyboard.clipboard.ClipboardPanelView
+import app.meltype.keyboard.clipboard.ClipboardPill
+import app.meltype.keyboard.clipboard.ClipboardPillGate
+import app.meltype.keyboard.clipboard.ClipboardProcessing
+import app.meltype.keyboard.clipboard.HistoryClip
+import app.meltype.keyboard.clipboard.RecentScreenshotSource
 import app.meltype.keyboard.core.CaretWatch
 import app.meltype.keyboard.core.CoreInputAdapter
 import app.meltype.keyboard.core.CoreMozcCallbacks
@@ -63,6 +86,7 @@ import app.meltype.keyboard.view.bottomPaddingPx
 import app.meltype.keyboard.mozc.MozcBackend
 import app.meltype.keyboard.mozc.MozcConverter
 import app.meltype.keyboard.mozc.MozcEngine
+import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -276,10 +300,28 @@ class KeyboardService : InputMethodService(), KeyListener {
     /** The candidate bar, to tap a candidate as a finger would (smoke test only). */
     internal fun candidateBarForSmokeTest(): CandidateBarView? = candidateBar
 
+    /** The keyboard's root view, to find the clipboard controls by their description (smoke test only). */
+    internal fun inputRootForSmokeTest(): View? = inputRoot
+
     private val languagePopup by lazy { LanguagePickerPopup(this) }
     private var keyboardView: KeyboardView? = null
     private var candidateBar: CandidateBarView? = null
     private var emojiPanel: EmojiPanelView? = null
+
+    /** 候補バーと、その右のクリップボードのボタン。絵文字・クリップボードの画面を開いているあいだは隠す。 */
+    private var barRow: View? = null
+    private var clipboardPanel: ClipboardPanelView? = null
+    private var clipboardButton: View? = null
+    private var lastClipboard: HistoryClip? = null
+    private var lastClipboardThumbnail: Bitmap? = null
+    private val clipboardPillGate by lazy {
+        ClipboardPillGate().apply {
+            restoreConsumedCopyToken(
+                getSharedPreferences("clipboard_pill", Context.MODE_PRIVATE).getString("consumed_copy", null)
+            )
+        }
+    }
+    private val clipboardPillExpiry = Runnable { refreshClipboardPill() }
     private val emojiRecents by lazy { EmojiRecentsStore(PrefsStore(this, "emoji")) }
 
     private var policy = FieldPolicy(emptyList(), symbols = false)
@@ -317,6 +359,10 @@ class KeyboardService : InputMethodService(), KeyListener {
         activeForSmokeTest = WeakReference(this)
         createdAtNanos = System.nanoTime()
         active = WeakReference(this)
+        clipboardManager = getSystemService(ClipboardManager::class.java)
+        clipboardManager?.addPrimaryClipChangedListener(clipboardListener)
+        ClipboardCleanupJob.ensureScheduled(this)
+        clipboardTask { clipboardStore.prune() }
         Settings(this).registerChangeListener(settingsListener)
         // 辞書を写すので時間がかかる。開き終わるまで、Core の変換は待つ。
         val mozc = mozc(this)
@@ -331,6 +377,10 @@ class KeyboardService : InputMethodService(), KeyListener {
     override fun onDestroy() {
         if (activeForSmokeTest?.get() === this) activeForSmokeTest = null
         if (active?.get() === this) active = null
+        stopScreenshotObserver()
+        mainHandler.removeCallbacks(clipboardPillExpiry)
+        clipboardManager?.removePrimaryClipChangedListener(clipboardListener)
+        clipboardWorker.shutdown()
         Settings(this).unregisterChangeListener(settingsListener)
         languagePopup.dismiss()
         discardCore()
@@ -396,7 +446,9 @@ class KeyboardService : InputMethodService(), KeyListener {
             val choice = coreInput.choices.getOrNull(index)
             // The Core decides what the tap does (a prediction commits; a conversion candidate is chosen for its clause).
             if (instance != null && choice != null) coreSend(instance, ImeJson.candidateClicked(choice.nativeIndex, fieldFacts()))
-        } }
+            clipboardPillGate.edited()
+            refreshClipboardPill()
+        }; it.onClipboardPick = { lastClipboard?.let(::pasteClipboardItem) } }
         val keys = KeyboardView(this).also { it.listener = this }
         // 絵文字の画面は、開いているあいだ、候補バーとキーの代わりに同じ場所に出る（高さは同じ）。
         val emoji = EmojiPanelView(this).also {
@@ -406,16 +458,54 @@ class KeyboardService : InputMethodService(), KeyListener {
         candidateBar = bar
         keyboardView = keys
         emojiPanel = emoji
+        // クリップボードの履歴も、開いているあいだ、候補バーとキーの代わりに同じ場所に出る。
+        val clipboard = ClipboardPanelView(this).apply {
+            visibility = View.GONE
+            onClose = ::closeClipboardPanel
+            onPick = ::pasteClipboardItem
+            onAction = ::clipboardAction
+        }
+        clipboardPanel = clipboard
         showLayout()
         val background = Palette.of(this).background
         styleNavigationBar(background)
         ImeGlassSurface.configureWindow(window?.window, this)
+        val density = resources.displayMetrics.density
+        fun dp(number: Int) = (number * density + 0.5f).toInt()
+        // 右端のクリップボードのボタンの下に、候補が隠れないようにする。
+        bar.setPadding(bar.paddingLeft, bar.paddingTop, dp(57), bar.paddingBottom)
+        val row = FrameLayout(this).apply {
+            addView(bar, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+            addView(ClipboardIconView(this@KeyboardService, "clipboard", Palette.of(this@KeyboardService).text).apply {
+                contentDescription = "クリップボード履歴"
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { openClipboardPanel() }
+                clipboardButton = this
+            }, FrameLayout.LayoutParams(dp(50), dp(46), Gravity.RIGHT or Gravity.CENTER_VERTICAL))
+        }
+        barRow = row
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(bar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(keys, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(emoji, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(clipboard, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(310)))
         }
+        // 履歴の高さは、候補バーとキーを合わせた高さにする (折りたたみの端末の配置でも)。
+        // 履歴を開いているあいだは、隠れた View の高さで測り直さない。
+        val updateClipboardHeight = {
+            if (clipboard.visibility != View.VISIBLE && row.height > 0 && keys.height > 0) {
+                val target = row.height + keys.height
+                val params = clipboard.layoutParams as? LinearLayout.LayoutParams
+                if (params != null && params.height != target) {
+                    params.height = target
+                    clipboard.layoutParams = params
+                }
+            }
+        }
+        row.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateClipboardHeight() }
+        keys.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateClipboardHeight() }
         keyColumn = column
         return FrameLayout(this).apply {
             inputRoot = this
@@ -543,6 +633,8 @@ class KeyboardService : InputMethodService(), KeyListener {
         // Restarted in the same editor without finishing it: the editor kept the composing text.
         if (coreInput.composing) leaveCore(focusLeft = false)
         policy = fieldPolicy(info.inputType, info.imeOptions)
+        clipboardPillGate.opened(restarting)
+        clipboardButton?.visibility = if (policy.isPassword) View.GONE else View.VISIBLE
         imeOptions = info.imeOptions
         fieldTraits = policy.traits
         fieldApp = info.packageName
@@ -554,9 +646,13 @@ class KeyboardService : InputMethodService(), KeyListener {
         coreInField = true
         screens.fieldStarted(policy.symbols)
         applyCurrentInsets()
+        updateLatestClipboard()
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        mainHandler.removeCallbacks(clipboardPillExpiry)
+        clipboardPillGate.closed()
+        closeClipboardPanel()
         keyboardView?.cancelTouch()
         languagePopup.dismiss()
         emojiPanel?.cancelTouch()
@@ -566,6 +662,8 @@ class KeyboardService : InputMethodService(), KeyListener {
     }
 
     override fun onFinishInput() {
+        mainHandler.removeCallbacks(clipboardPillExpiry)
+        clipboardPillGate.closed()
         keyboardView?.cancelTouch()
         emojiPanel?.cancelTouch()
         dropComposition()
@@ -609,10 +707,23 @@ class KeyboardService : InputMethodService(), KeyListener {
         val start = System.nanoTime()
         connection?.beginBatchEdit()
         try {
+            // 文字・空白・確定・変換は、コピーしたものを出すのをやめる。出し直すのは、削除で入力欄が空になったときだけ。
+            if (action != KeyAction.Delete && action != KeyAction.Shift) clipboardPillGate.edited()
             handleKey(action, direction, timeMs)
         } finally {
             connection?.endBatchEdit()
         }
+        if (action == KeyAction.Delete) {
+            // 入力欄によっては、消したあとの中身を遅れて知らせるので、知らせのあとにも確かめる。
+            if (editorIsCompletelyEmpty()) clipboardPillGate.deleted(true)
+            else mainHandler.post {
+                if (editorIsCompletelyEmpty()) {
+                    clipboardPillGate.deleted(true)
+                    refreshClipboardPill()
+                }
+            }
+        }
+        refreshClipboardPill()
         if (PerfLog.enabled) {
             // key: 指を離した（または繰り返しが起きた）ときから、入力欄への書き込みを呼び終えるまで。
             PerfLog.event("key", (SystemClock.uptimeMillis() - timeMs) * 1000)
@@ -663,6 +774,7 @@ class KeyboardService : InputMethodService(), KeyListener {
         if (!Settings(this).emojiEnabled) return false
         val panel = emojiPanel ?: return false
         keyboardView?.cancelTouch()   // 絵文字キーから別のキーへ指を移していても、隠れるキーボードには入力させない
+        closeClipboardPanel()
         // パスワードの欄では、覚えてある絵文字を見せない（spec 04・09）。
         panel.open(nav.current, enterKind(imeOptions), policy.showsRecentEmoji, timeMs)
         swapEmojiPanel(panel, open = true)
@@ -678,7 +790,7 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     private fun swapEmojiPanel(panel: EmojiPanelView, open: Boolean) {
         panel.visibility = if (open) View.VISIBLE else View.GONE
-        candidateBar?.visibility = if (open) View.GONE else View.VISIBLE
+        barRow?.visibility = if (open) View.GONE else View.VISIBLE
         keyboardView?.visibility = if (open) View.GONE else View.VISIBLE
     }
 
@@ -693,6 +805,266 @@ class KeyboardService : InputMethodService(), KeyListener {
             connection?.endBatchEdit()
         }
         emojiRecents.used(emoji, policy.recordsEmoji)
+        clipboardPillGate.edited()
+        refreshClipboardPill()
+    }
+
+    private fun editorIsCompletelyEmpty(): Boolean {
+        val connection = currentInputConnection ?: return false
+        return connection.getTextBeforeCursor(1, 0)?.isEmpty() == true &&
+            connection.getTextAfterCursor(1, 0)?.isEmpty() == true &&
+            !coreInput.composing
+    }
+
+    /** パスワードの欄・覚えない欄・中身を読めない欄では、コピーしたものを出さない。 */
+    private fun clipboardHidden(): Boolean =
+        policy.isPassword || FieldPolicy.PRIVATE in fieldTraits || !fieldReadable
+
+    /** コピーしてから 5 分以内で、まだ打っていない (または消して空にした) 入力欄なら、候補バーにコピーしたものを出す。 */
+    private fun refreshClipboardPill() {
+        val bar = candidateBar ?: return
+        val clip = lastClipboard
+        val pill = if (clip == null || clipboardHidden() || selStart != selEnd || coreInput.composing ||
+            !clipboardPillGate.canOffer(clip.id, clip.createdAt, System.currentTimeMillis())) null
+        else if (clip.isMedia && currentInputEditorInfo?.contentMimeTypes.orEmpty()
+                .none { ClipDescription.compareMimeTypes(clip.mime, it) }) null
+        else ClipboardPill(clip.text.take(70), clip.kind == "image", lastClipboardThumbnail)
+        bar.showClipboard(pill)
+        mainHandler.removeCallbacks(clipboardPillExpiry)
+        if (pill != null && clip != null) {
+            val remaining = clip.createdAt + ClipboardPillGate.MAX_OFFER_AGE_MS - System.currentTimeMillis()
+            if (remaining > 0) mainHandler.postDelayed(clipboardPillExpiry, remaining)
+        }
+    }
+
+    private fun updateLatestClipboard() {
+        clipboardTask {
+            val newest = clipboardStore.list().firstOrNull()
+            val preview = if (newest?.kind == "image") {
+                clipboardStore.mediaFile(newest)?.absolutePath?.let {
+                    BitmapFactory.decodeFile(it, BitmapFactory.Options().apply { inSampleSize = 8 })
+                }
+            } else null
+            mainHandler.post {
+                lastClipboard = newest
+                lastClipboardThumbnail = preview
+                refreshClipboardPill()
+            }
+        }
+    }
+
+    private val clipboardWorker = Executors.newSingleThreadExecutor()
+
+    /**
+     * 履歴の読み書きは、キーの処理を待たせないよう裏のスレッドで行う。履歴のデータベースを読み書きできなくても
+     * キーボードは止めない (裏のスレッドの例外は、キーボードのプロセスごと落とす)。ログに出して気付けるようにする。
+     */
+    private fun clipboardTask(task: () -> Unit) {
+        if (clipboardWorker.isShutdown) return
+        clipboardWorker.execute {
+            try {
+                task()
+            } catch (error: SQLException) {
+                Log.w(TAG, "Clipboard history: " + error.javaClass.simpleName)
+            }
+        }
+    }
+    private val clipboardStore by lazy { ClipboardHistoryStore(applicationContext) }
+    private val screenshots by lazy { RecentScreenshotSource(applicationContext) }
+    private var lastScreenshotId = -1L
+    private var screenshotObserverRegistered = false
+    private val screenshotObserver by lazy {
+        object : ContentObserver(mainHandler) {
+            override fun onChange(selfChange: Boolean) {
+                super.onChange(selfChange)
+                detectRecentScreenshot()
+            }
+        }
+    }
+
+    private fun detectRecentScreenshot() {
+        if (!screenshots.enabled() || !coreInField || clipboardHidden()) return
+        clipboardTask {
+            val image = screenshots.newestRecent() ?: return@clipboardTask
+            if (image.id == lastScreenshotId) return@clipboardTask
+            lastScreenshotId = image.id
+            // 撮った画面も、コピーした画像と同じく履歴に写して、同じ貼り付けの道を使う。
+            if (clipboardStore.capture(ClipData.newUri(contentResolver, "Screenshot", image.uri), image.capturedAtMs)) {
+                mainHandler.post {
+                    refreshClipboardPanel()
+                    updateLatestClipboard()
+                }
+            }
+        }
+    }
+
+    private fun startScreenshotObserver() {
+        if (!screenshots.enabled() || screenshotObserverRegistered || clipboardHidden()) return
+        try {
+            contentResolver.registerContentObserver(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, screenshotObserver)
+            screenshotObserverRegistered = true
+            detectRecentScreenshot()
+        } catch (error: SecurityException) {
+            Log.w(TAG, "Screenshot observer permission unavailable", error)
+        }
+    }
+
+    private fun stopScreenshotObserver() {
+        if (!screenshotObserverRegistered) return
+        contentResolver.unregisterContentObserver(screenshotObserver)
+        screenshotObserverRegistered = false
+    }
+
+    override fun onWindowShown() {
+        super.onWindowShown()
+        startScreenshotObserver()
+    }
+
+    override fun onWindowHidden() {
+        stopScreenshotObserver()
+        super.onWindowHidden()
+    }
+
+    private var clipboardManager: ClipboardManager? = null
+    private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
+        if (policy.isPassword) return@OnPrimaryClipChangedListener
+        val clip = try { clipboardManager?.primaryClip } catch (_: SecurityException) { null }
+        clip?.let(::captureClipboard)
+    }
+
+    private fun captureClipboard(clip: ClipData) {
+        if (clipboardStore.isSensitive(clip)) return
+        clipboardTask {
+            if (clipboardStore.capture(clip)) mainHandler.post { refreshClipboardPanel(); updateLatestClipboard() }
+        }
+    }
+
+    private fun refreshClipboardPanel() {
+        if (clipboardPanel?.visibility != View.VISIBLE || policy.isPassword) return
+        clipboardTask {
+            val clips = clipboardStore.list()
+            mainHandler.post {
+                if (clipboardPanel?.visibility == View.VISIBLE && !policy.isPassword) clipboardPanel?.display(clips)
+            }
+        }
+    }
+
+    /** 履歴は、入力欄の上に重ねず、候補バーとキーの代わりに出す。 */
+    private fun openClipboardPanel() {
+        if (policy.isPassword) return
+        commitComposing()
+        keyboardView?.cancelTouch()
+        closeEmojiPanel()
+        clipboardPanel?.visibility = View.VISIBLE
+        barRow?.visibility = View.GONE
+        keyboardView?.visibility = View.GONE
+        refreshClipboardPanel()
+    }
+
+    private fun closeClipboardPanel() {
+        clipboardPanel?.visibility = View.GONE
+        if (emojiPanel?.visibility != View.VISIBLE) {
+            barRow?.visibility = View.VISIBLE
+            keyboardView?.visibility = View.VISIBLE
+        }
+    }
+
+    /** 貼り付けたコピーは、入力欄を空にしても開き直しても、もう候補バーに出さない。覚えるのは番号とコピーした時刻だけ。 */
+    private fun rememberSuccessfulClipboardPaste(clip: HistoryClip) {
+        val token = clipboardPillGate.pasted(clip.id, clip.createdAt)
+        getSharedPreferences("clipboard_pill", Context.MODE_PRIVATE).edit().putString("consumed_copy", token).apply()
+        refreshClipboardPill()
+    }
+
+    private fun notice(text: String) {
+        Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun pasteClipboardItem(clip: HistoryClip) {
+        if (policy.isPassword) return
+        commitComposing()
+        if (!clip.isMedia) {
+            if (currentInputConnection?.commitText(clip.text, 1) == true) {
+                rememberSuccessfulClipboardPaste(clip)
+                closeClipboardPanel()
+            } else notice("貼り付けできませんでした")
+            return
+        }
+        val supported = currentInputEditorInfo?.contentMimeTypes.orEmpty()
+            .any { ClipDescription.compareMimeTypes(clip.mime, it) }
+        if (!supported) {
+            notice("この入力欄は画像を貼り付けられません")
+            return
+        }
+        val content = InputContentInfo(
+            ClipboardContentProvider.uri(this, clip.id),
+            ClipDescription(clip.fileName ?: "Clipboard", arrayOf(clip.mime)),
+        )
+        val done = currentInputConnection?.commitContent(
+            content, InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null
+        ) == true
+        if (done) {
+            rememberSuccessfulClipboardPaste(clip)
+            closeClipboardPanel()
+        } else notice("貼り付けできませんでした")
+    }
+
+    private fun clipboardAction(clip: HistoryClip, action: String) {
+        if (policy.isPassword) return
+        when (action) {
+            "copy" -> {
+                val data = if (clip.isMedia) {
+                    ClipData.newUri(contentResolver, clip.fileName ?: "Clipboard", ClipboardContentProvider.uri(this, clip.id))
+                } else if (clip.html != null) {
+                    ClipData.newHtmlText("Meltype", clip.text, clip.html)
+                } else {
+                    ClipData.newPlainText("Meltype", clip.text)
+                }
+                clipboardManager?.setPrimaryClip(data)
+                closeClipboardPanel()
+            }
+            "clean" -> {
+                val normalized = ClipboardLinkPreviewLoader.stripParameters(clip.text)
+                if (clip.kind != "link" || normalized == clip.text) return
+                clipboardTask {
+                    if (!clipboardStore.edit(clip.id, normalized)) clipboardStore.saveText(normalized)
+                    mainHandler.post {
+                        clipboardManager?.setPrimaryClip(ClipData.newPlainText("Meltype", normalized))
+                        notice("パラメータを除去してコピーしました")
+                        refreshClipboardPanel()
+                    }
+                }
+            }
+            "delete" -> clipboardTask {
+                clipboardStore.delete(clip.id)
+                mainHandler.post { refreshClipboardPanel() }
+            }
+            "edit" -> {
+                startActivity(Intent(this, ClipboardEditorActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra(ClipboardEditorActivity.EXTRA_ID, clip.id))
+                closeClipboardPanel()
+            }
+            "translate" -> ClipboardProcessing.translate(clip.text, ::saveProcessedClipboard)
+            "ocr" -> ClipboardProcessing.ocr(this, clip, ::saveProcessedClipboard)
+        }
+    }
+
+    /** 翻訳・文字の読み取りの結果は、履歴に足す (いまの入力欄には入れない)。 */
+    private fun saveProcessedClipboard(result: Result<String>) {
+        if (clipboardWorker.isShutdown) return
+        val text = result.getOrNull()
+        if (text == null) {
+            notice("処理できませんでした（言語・画像・モデルを確認）")
+            return
+        }
+        clipboardTask {
+            clipboardStore.saveText(text)
+            mainHandler.post {
+                notice("結果をクリップボード履歴に保存しました")
+                refreshClipboardPanel()
+            }
+        }
     }
 
     /** 言語のメニューを出す。未確定文字があるあいだは出さない (空白キーの長押しで文節・カーソルを動かす)。 */
