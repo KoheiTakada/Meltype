@@ -31,9 +31,6 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
     private var shown: List<DisplayCandidate> = emptyList()
     private var shownSelected: Int? = null
     private var clipboard: ClipboardPill? = null
-    private var shownTyped: String? = null
-    /** 候補の前に出している、打ったもの (ローマ字) の表示の数 (0 か 1)。タップできない。 */
-    private var labels = 0
 
     init {
         isHorizontalScrollBarEnabled = false
@@ -45,11 +42,11 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
         addView(row, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
     }
 
-    /** 最近コピーしたものを、候補も打ったものも無いあいだだけ出す。null なら出さない。 */
+    /** 最近コピーしたものを、候補が無いあいだだけ出す。null なら出さない。 */
     fun showClipboard(pill: ClipboardPill?) {
         if (pill == clipboard) return
         clipboard = pill
-        if (shown.isEmpty() && shownTyped.isNullOrEmpty()) {
+        if (shown.isEmpty()) {
             row.removeAllViews()
             addClipboard()
         }
@@ -61,25 +58,11 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT))
     }
 
-    /** [typed] は打ったもの (ローマ字)。表示と違うときだけ、候補の前に薄く出す (どう打ったかが見える)。 */
-    fun show(candidates: List<DisplayCandidate>, selected: Int?, typed: String? = null) {
-        if (candidates == shown && selected == shownSelected && typed == shownTyped) return
-        if (candidates != shown || typed != shownTyped) {
+    fun show(candidates: List<DisplayCandidate>, selected: Int?) {
+        if (candidates == shown && selected == shownSelected) return
+        if (candidates != shown) {
             row.removeAllViews()
             val pad = (17 * density).toInt()
-            labels = 0
-            if (!typed.isNullOrEmpty()) {
-                row.addView(TextView(context).apply {
-                    text = typed
-                    contentDescription = "打ったもの: " + typed
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                    setTextColor(palette.subText)
-                    gravity = Gravity.CENTER
-                    setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
-                    isSingleLine = true
-                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT))
-                labels = 1
-            }
             candidates.forEachIndexed { i, c ->
                 val tv = TextView(context).apply {
                     text = c.text
@@ -102,15 +85,14 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
                 lp.marginEnd = (3*density).toInt()
                 row.addView(tv, lp)
             }
-            if (candidates.isEmpty() && labels == 0) addClipboard()
+            if (candidates.isEmpty()) addClipboard()
             // 並びが変わったら先頭から見せる（前の並びを横に送った位置のままだと、第一候補が隠れる）。
             scrollTo(0, 0)
         }
         shown = candidates
         shownSelected = selected
-        shownTyped = typed
         for (i in candidates.indices) {
-            val tv = row.getChildAt(i + labels) as TextView
+            val tv = row.getChildAt(i) as TextView
             val on = i == selected
             // Suggestions are text directly on the translucent IME surface.
             // No white pills or selected-item background: touch targets remain
@@ -119,8 +101,8 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
             tv.typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
             tv.setTextColor(if (on) palette.pill else palette.text)
         }
-        if (selected != null && selected in candidates.indices) {
-            val target = row.getChildAt(selected + labels)
+        if (selected != null && selected in 0 until row.childCount) {
+            val target = row.getChildAt(selected)
             post { scrollIntoView(target) }
         }
     }

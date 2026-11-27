@@ -38,8 +38,6 @@ internal data class ImeView(
     val candidates: ImeCandidates?,
     val clauses: List<String> = emptyList(),
     val selectedClause: Int = 0,
-    /** 打ったもの (ローマ字)。表示の文字と同じなら Core が送らないので null。 */
-    val typed: String? = null,
 )
 
 /** [japanese] は、打ったら効く言語モードが日本語か (state.languageMode。受け持たない入力欄では英数)。 */
@@ -152,6 +150,5 @@ internal object ImeJson {
         },
         clauses = view.getJSONArray("clauses").let { clauses -> (0 until clauses.length()).map { clauses.getString(it) } },
         selectedClause = view.getInt("selectedClause"),
-        typed = if (view.isNull("typedKeys")) null else view.getString("typedKeys").ifEmpty { null },
     )
 }

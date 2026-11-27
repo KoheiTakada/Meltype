@@ -49,10 +49,10 @@ internal static class FrontProtocolTests
             Others: []),
         new("Android", "android/app/src/main/kotlin/app/meltype/keyboard/core/ImeJson.kt", source => source,
             new(["getString", "getInt", "getBoolean", "getJSONObject", "getJSONArray", "optString", "optInt", "optBoolean", "optJSONObject", "optJSONArray", "isNull"]),
-            // Android reports field facts to Core, and handles text edits, candidate choices (with the typed keys in front of them) and the language mode from its output.
+            // Android reports field facts to Core, and handles text edits, candidate choices and the language mode from its output.
             Unused: ["version", "handlesInput", "imeOpen", "modeIndicatorMs", "capture", "printableAscii",
                 "printableAsciiExcept", "shortcuts", "vk", "modifiers", "ctrlKeysWhileComposing", "revision", "currentWord", "insertByPaste",
-                "keyReleases", "altKeys", "hint", "spellingSuggestion", "notes", "numbered",
+                "keyReleases", "altKeys", "hint", "spellingSuggestion", "typedKeys", "notes", "numbered",
                 "selectedMeaning", "meaningDelayMs"],
             Others: []),
         new("macOS", "mac/Sources/MeltypeIME/NativeCore.swift", source => source[source.IndexOf("struct ImeOutput", StringComparison.Ordinal)..source.IndexOf("/// libMeltypeNative", StringComparison.Ordinal)],

@@ -161,7 +161,7 @@ class KeyboardService : InputMethodService(), KeyListener {
             val response = instance.handle(event)
                 ?: throw IllegalStateException("Native Core returned no output")
             val consumed = coreInput.apply(response)
-            candidateBar?.show(coreInput.candidates, coreInput.selected, coreInput.view?.typed)
+            candidateBar?.show(coreInput.candidates, coreInput.selected)
             // The letters page shows the Core's language mode.
             if (nav.japanese != coreInput.japanese) {
                 nav.japanese = coreInput.japanese
