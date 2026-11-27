@@ -75,18 +75,32 @@ internal sealed class MozcConverter : IKanjiConverter, IDisposable
     internal IReadOnlyList<(ConversionClause Clause, IReadOnlyList<string> Candidates)>? ConvertWithCandidates(ConversionRequest request) =>
         WithContext(request.Hiragana, request.Before, (context, reading) => Query(context, reading, request.Deadline));
 
+    public IReadOnlyList<ConversionClause>? CompletedConversion(ConversionRequest request)
+    {
+        List<(ConversionClause Clause, IReadOnlyList<string> Candidates)>? result;
+        // 文脈付きと文脈なしを同じ控えから読み、区切りがまだ決まっていない間は一覧を出さない。
+        // 読みだけで引く候補の控えには触らない。別の文で得た同じ読みの候補と混ざるため。
+        lock (_resultsGate)
+        {
+            if (_disposed) return null;
+            result = WithContext(request.Hiragana, request.Before,
+                (context, reading) => _conversions.GetValueOrDefault(Clean(context) + "\t" + Clean(reading)), requireBoth: true);
+        }
+        return result?.Select(s => s.Clause with { Candidates = s.Candidates }).ToList();
+    }
+
     /// <summary>ConvertWithCandidates と同じ (前の文脈なし)。ヘルパーが答えるまで待つので、入力スレッドでは呼ばない。</summary>
     internal IReadOnlyList<(ConversionClause Clause, IReadOnlyList<string> Candidates)>? ConvertWithCandidatesNow(string hiragana) =>
         WithContext(hiragana, null, Request);
 
     /// <summary>before から Mozc に渡す文脈を決めて、request (待つ・待たない) で変換する。</summary>
     private static List<(ConversionClause Clause, IReadOnlyList<string> Candidates)>? WithContext(string hiragana, string? before,
-        Func<string, string, List<(string Reading, IReadOnlyList<string> Candidates, bool UserWord)>?> request)
+        Func<string, string, List<(string Reading, IReadOnlyList<string> Candidates, bool UserWord)>?> request, bool requireBoth = false)
     {
         if (EngineContext.Sentence(before) is not { } sentence) return WithCandidates(request("", hiragana));
         var withContext = request(sentence, hiragana);
         var plain = request("", hiragana);
-        if (withContext is null || plain is null) return WithCandidates(withContext ?? plain);
+        if (withContext is null || plain is null) return requireBoth ? null : WithCandidates(withContext ?? plain);
         return WithCandidates(withContext.Select(s => s.Reading).SequenceEqual(plain.Select(s => s.Reading)) ? withContext : plain);
     }
 

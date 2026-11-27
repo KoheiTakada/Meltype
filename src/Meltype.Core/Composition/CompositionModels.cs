@@ -35,6 +35,9 @@ internal sealed class Clause(string reading, bool isEnglish, List<string> candid
     /// </summary>
     public string? Engine { get; init; }
 
+    /// <summary>入力中の一覧を作るときに使った、同じ変換結果の候補。結果がなければ null。</summary>
+    public IReadOnlyList<string>? CompletedCandidates { get; init; }
+
     /// <summary><see cref="CompositionConversion"/> が候補を足し終えたか。</summary>
     public bool EngineCandidatesAdded { get; set; }
 

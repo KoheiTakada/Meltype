@@ -58,6 +58,12 @@ internal static class MozcConverterTests
                 case "C" when fields[2] == "きょう":
                     output.WriteLine("きょう\x1f今日");
                     break;
+                // 文脈によって候補が変わっても、同じ区切りなら文脈付きの候補を表示する。
+                case "C" when fields[2] == "かわいいね":
+                    output.WriteLine(fields[1] == "猫は"
+                        ? "かわいい\x1fかわいい\x1f可愛い" + '\x1e' + "ね\x1fね"
+                        : "かわいい\x1f可愛い\x1fカワイイ" + '\x1e' + "ね\x1fね");
+                    break;
                 case "C":
                     output.WriteLine(fields[2] + '\x1f' + fields[2]);
                     break;
@@ -77,6 +83,21 @@ internal static class MozcConverterTests
 
     /// <summary>偽のヘルパーで動く Mozc (最初の変換は起動を待つ)。</summary>
     public static MozcConverter Fake() => new(new MozcHelperProcess(Environment.ProcessPath!, Path.Combine(Path.GetTempPath(), FakeHelperProfile)));
+
+    [Test]
+    public static void Mozc_CompletedConversionUsesTheCurrentReadingAndValidatedContext()
+    {
+        using var mozc = Fake();
+        var plain = new ConversionRequest("かわいいね", null);
+        var contextual = plain with { Before = "猫は" };
+        Assert.True(mozc.Convert(plain) is not null, "文脈なしの読みを変換");
+        Assert.True(mozc.CompletedConversion(contextual) is null, "同じ読みでも、文脈付きの変換が終わるまで候補を返さない");
+
+        Assert.True(mozc.Convert(contextual) is not null, "文脈付きの読みを変換");
+        Assert.Equal("かわいい", mozc.CompletedConversion(contextual)![0].Candidates![0]);
+        Assert.Equal("可愛い", mozc.CompletedConversion(plain)![0].Candidates![0]);
+        Assert.True(mozc.CompletedConversion(contextual with { Hiragana = "かわいいねえ" }) is null, "続けて打った読みには古い候補を返さない");
+    }
 
     [Test]
     public static void Mozc_StartsInBackground_AndDoesNotWaitForIt()

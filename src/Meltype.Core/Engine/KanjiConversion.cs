@@ -13,6 +13,8 @@ internal sealed record ConversionClause(string Reading, string Text, bool Zenzai
 {
     /// <summary>Mozc がユーザー辞書の語を含む候補にした文節 (活用した形も含む)。</summary>
     public bool UserWord { get; init; }
+    /// <summary>入力中の一覧用に、完了したこの変換が返した候補。</summary>
+    public IReadOnlyList<string>? Candidates { get; init; }
 }
 
 /// <summary>
@@ -57,6 +59,9 @@ internal interface IKanjiConverter
 {
     /// <summary>文節に区切って変換する。変換できなければ (変換エンジンが使えない・Deadline までに答えが無い) null。</summary>
     IReadOnlyList<ConversionClause>? Convert(ConversionRequest request);
+
+    /// <summary>入力中の一覧用。今の読みと文脈の変換が完了していれば文節と候補を返す。新しい要求は出さない。</summary>
+    IReadOnlyList<ConversionClause>? CompletedConversion(ConversionRequest request) => null;
 
     /// <summary>
     /// Deadline の後に変換エンジンのキャッシュに結果が入った (または変換エンジンが使えるようになった)。ワーカーのスレッドで呼ぶ。

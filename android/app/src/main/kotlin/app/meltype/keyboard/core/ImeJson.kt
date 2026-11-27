@@ -92,7 +92,7 @@ internal object ImeJson {
     /** 裏で動いていた変換が終わった。Core は結果で変換中の表示を作り直す。 */
     fun conversionFinished(field: ImeFieldFacts?): String = event("ConversionFinished", field) {}
 
-    /** 前の応答の一覧の [index] 番目をタップした。 */
+    /** 前の応答の一覧から [choice] をタップした。 */
     fun candidateClicked(choice: CoreChoice, field: ImeFieldFacts?): String =
         event("CandidateClicked", field) {
             put("index", choice.nativeIndex)

@@ -27,7 +27,9 @@ internal static class CompositionRefresh
     private static bool RefreshOpenConversion(CompositionState state, CompositionScene.Converting scene, CompositionEnv env)
     {
         var open = scene.Conversion;
-        if (open.Edited || scene.Input.Reconversion is not null || open.Clauses is [{ Alternatives: not null, Changed: true }]) return false;
+        // 入力中の候補から開いた変換は、選んだときの文節をそのまま使う。
+        if (open.Edited || open.StartedBy == ConversionTrigger.TypingCandidate ||
+            scene.Input.Reconversion is not null || open.Clauses is [{ Alternatives: not null, Changed: true }]) return false;
         var incoming = CompositionConversion.BuildConversion(scene.Input, env.WithoutWaiting(), open.StartedBy, open.PreferJapanese);
         var merged = Merge(open, incoming, CompositionConversion.InitialClause(env, open.Clauses.Count));
         if (ReferenceEquals(merged, open)) return false;

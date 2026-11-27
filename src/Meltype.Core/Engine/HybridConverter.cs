@@ -86,6 +86,8 @@ internal sealed class HybridConverter(MozcConverter mozc, Func<ZenzaiConverter?>
         return Choose(request.Hiragana, fromMozc, z);
     }
 
+    public IReadOnlyList<ConversionClause>? CompletedConversion(ConversionRequest request) => mozc.CompletedConversion(request);
+
     /// <summary><see cref="Convert"/> の、Zenzai の答え z と Mozc の結果 fromMozc から使う結果を選ぶところ。</summary>
     internal static IReadOnlyList<ConversionClause>? Choose(string hiragana, IReadOnlyList<(ConversionClause Clause, IReadOnlyList<string> Candidates)>? fromMozc,
         IReadOnlyList<ConversionClause> z)

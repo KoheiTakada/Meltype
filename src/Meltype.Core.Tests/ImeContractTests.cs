@@ -829,16 +829,41 @@ internal static class ImeContractTests
         }
     }
 
-    private static Front TypingCandidatesFront(bool showTypingCandidates = true)
+    private sealed class TypingCandidatesConverter : IKanjiConverter
     {
+        private readonly IKanjiConverter _inner = new CompositionTests.FakeConverter();
+        public List<string> Requested { get; } = [];
+        public List<string> Expanded { get; } = [];
+        public string? Standalone { get; set; }
+
+        public IReadOnlyList<ConversionClause>? Convert(ConversionRequest request)
+        {
+            Requested.Add(request.Hiragana);
+            return request.Hiragana == "にほんごを" && Standalone is { } text ? [new ConversionClause(request.Hiragana, text)] : _inner.Convert(request);
+        }
+
+        public IReadOnlyList<ConversionClause>? CompletedConversion(ConversionRequest request) =>
+            _inner.Convert(request)?.Select(c => c.Reading == "にほんごを" ? c with { Candidates = ["日本語を", "にほん語を"] } : c).ToList();
+
+        public IReadOnlyList<string> Candidates(string reading, long deadline)
+        {
+            Expanded.Add(reading);
+            return reading == "にほんごを" ? ["日本語を", "にほん語を"] : [];
+        }
+    }
+
+    private static Front TypingCandidatesFront(bool showTypingCandidates = true, TypingCandidatesConverter? converter = null)
+    {
+        converter ??= new TypingCandidatesConverter();
         var front = new Front
         {
             ShowTypingCandidates = showTypingCandidates,
             LateResults = true,
+            Converter = converter,
             Services = new CompositionServices
             {
                 Predictor = new Predictor(null, () => [("にほんごをかくれんしゅう", "日本語を書く練習")], null),
-                MoreCandidates = (reading, _) => reading == "にほんごを" ? ["日本語を", "にほん語を"] : [],
+                MoreCandidates = converter.Candidates,
             },
         };
         front.Settings.LiveConversion = true;
@@ -871,6 +896,28 @@ internal static class ImeContractTests
         var typing = front.Type("nihongowokaku")[^1];
         Assert.True(!View(typing).TryGetProperty("typingCandidates", out _), front.Trace);
         Assert.True(Candidates(typing).Contains("日本語を書く練習"), front.Trace);
+    }
+
+    [Test]
+    public static void TypingCandidates_DoNotRequestStandaloneConversionsOrReorderWhenOneFinishes()
+    {
+        var converter = new TypingCandidatesConverter();
+        var front = TypingCandidatesFront(converter: converter);
+        front.Document = "毎日";
+        var typing = front.Type("nihongowokaku")[^1];
+        var shown = View(typing).GetProperty("typingCandidates").GetRawText();
+        // この打鍵には「かく」だけを別に変換する必要がない。予測の分も含め、候補を出さないフロントと同じ要求で済む。
+        var baselineConverter = new TypingCandidatesConverter();
+        var baseline = TypingCandidatesFront(showTypingCandidates: false, converter: baselineConverter);
+        baseline.Document = front.Document;
+        baseline.Type("nihongowokaku");
+        Assert.True(converter.Requested.SequenceEqual(baselineConverter.Requested), string.Join(", ", converter.Requested));
+
+        converter.Standalone = "日本語ヲ";
+        var refreshed = front.Event("ConversionFinished");
+        Assert.Equal(shown, View(refreshed).GetProperty("typingCandidates").GetRawText(), front.Trace);
+        Assert.Equal(0, converter.Expanded.Count, front.Trace);
+        Assert.True(Candidates(front.Key(' ')).Contains("日本語ヲ"), front.Trace);
     }
 
     [Test]
@@ -912,21 +959,26 @@ internal static class ImeContractTests
     {
         using var release = new ManualResetEventSlim();
         using var ready = new ManualResetEventSlim();
+        ConversionClause[] answer = [new("かわいい", "かわいい") { Candidates = ["かわいい", "可愛い"] }];
         using var converter = new BackgroundCallbackConverter((reading, _) =>
-            reading == "きょうは" && release.Wait(5000) ? [new ConversionClause(reading, "今日は")] : null, _ => []);
+            reading == "かわいい" && release.Wait(5000) ? answer : null, _ => []);
         converter.ResultReady += ready.Set;
         var front = new Front { Converter = converter, LateResults = true, ShowTypingCandidates = true };
         front.Settings.LiveConversion = true;
 
-        var pending = front.Type("kyouha")[^1];
-        Assert.Equal("きょうは", View(pending).GetProperty("text").GetString(), front.Trace);
+        var pending = front.Type("kawaii")[^1];
+        Assert.Equal("かわいい", View(pending).GetProperty("text").GetString(), front.Trace);
         Assert.True(!View(pending).TryGetProperty("typingCandidates", out _), front.Trace);
         release.Set();
         Assert.True(ready.Wait(5000), "遅れていた変換結果が届く");
 
         var arrived = front.Event("ConversionFinished");
-        Assert.Equal("今日は", View(arrived).GetProperty("text").GetString(), front.Trace);
-        Assert.Equal("今日は", View(arrived).GetProperty("typingCandidates")[0].GetString(), front.Trace);
+        Assert.Equal("かわいい", View(arrived).GetProperty("text").GetString(), front.Trace);
+        var candidates = View(arrived).GetProperty("typingCandidates");
+        Assert.Equal("かわいい", candidates[0].GetString(), front.Trace);
+        Assert.True(candidates.EnumerateArray().Any(c => c.GetString() == "可愛い"), front.Trace);
+        var continued = front.Key('n');
+        Assert.True(!View(continued).TryGetProperty("typingCandidates", out _), front.Trace);
     }
 
     [Test]
