@@ -71,6 +71,8 @@ internal static class ImeContractTests
         /// <summary>OS が IME の開閉を持つフロント (TSF など) か。持たないフロント (Android) は imeOpen を送らない。</summary>
         public bool SendsImeOpen { get; init; } = true;
 
+        public bool ShowTypingCandidates { get; init; }
+
         /// <summary>入力欄の性質 (OS が知らせるもの)。</summary>
         public List<string> Traits { get; } = [];
 
@@ -115,7 +117,8 @@ internal static class ImeContractTests
             var composing = Composition.GetValueOrDefault(instance) is not null;
             var surrounding = Sends switch { "Document" => $"\"before\":{Json(Document)},\"after\":\"\",", null => "", _ => $"\"before\":{Json(Sends)},\"after\":\"\"," };
             var field = $"{{{surrounding}\"composing\":{(composing ? "true" : "false")},\"traits\":{JsonSerializer.Serialize(Traits)}" +
-                (App is null ? "" : $",\"app\":{Json(App)}") + (Selection is null ? "" : $",\"selection\":{Json(Selection)}") + "}";
+                (App is null ? "" : $",\"app\":{Json(App)}") + (Selection is null ? "" : $",\"selection\":{Json(Selection)}") +
+                (ShowTypingCandidates ? ",\"showTypingCandidates\":true" : "") + "}";
             var fieldFact = omitField ? "" : $",\"field\":{field}";
             var output = Send($"{{\"version\":{ImeHost.Version},\"type\":\"{type}\",\"instance\":{Json(instance)}{(SendsImeOpen ? $",\"imeOpen\":{(Open ? "true" : "false")}" : "")}{fieldFact}{extra}}}");
             Apply(output, instance);
@@ -824,6 +827,106 @@ internal static class ImeContractTests
             Assert.Equal(0, Commits(result).GetArrayLength(), front.Trace);
             Assert.Equal(0, phrases.Count, front.Trace);
         }
+    }
+
+    private static Front TypingCandidatesFront(bool showTypingCandidates = true)
+    {
+        var front = new Front
+        {
+            ShowTypingCandidates = showTypingCandidates,
+            LateResults = true,
+            Services = new CompositionServices
+            {
+                Predictor = new Predictor(null, () => [("にほんごをかくれんしゅう", "日本語を書く練習")], null),
+                MoreCandidates = (reading, _) => reading == "にほんごを" ? ["日本語を", "にほん語を"] : [],
+            },
+        };
+        front.Settings.LiveConversion = true;
+        front.Settings.PredictiveCandidates = true;
+        front.Settings.PartialCommit = true;
+        return front;
+    }
+
+    [Test]
+    public static void TypingCandidates_MatchTheFirstClauseOfSpaceAlongsidePredictions()
+    {
+        var front = TypingCandidatesFront();
+        var typing = front.Type("nihongowokaku")[^1];
+        Assert.Equal("日本語を書く", View(typing).GetProperty("text").GetString(), front.Trace);
+        Assert.True(!View(typing).GetProperty("converting").GetBoolean(), front.Trace);
+        var candidates = View(typing).GetProperty("typingCandidates").EnumerateArray().Select(c => c.GetString()).ToList();
+        Assert.True(candidates.Contains("にほん語を"), front.Trace);
+        Assert.True(Candidates(typing).Contains("日本語を書く練習"), front.Trace);
+
+        var converting = front.Key(' ');
+        Assert.True(View(converting).GetProperty("converting").GetBoolean(), front.Trace);
+        Assert.True(!View(converting).TryGetProperty("typingCandidates", out _), front.Trace);
+        Assert.True(candidates.SequenceEqual(Candidates(converting)), front.Trace);
+    }
+
+    [Test]
+    public static void TypingCandidates_DefaultFrontStillGetsOnlyPredictions()
+    {
+        var front = TypingCandidatesFront(showTypingCandidates: false);
+        var typing = front.Type("nihongowokaku")[^1];
+        Assert.True(!View(typing).TryGetProperty("typingCandidates", out _), front.Trace);
+        Assert.True(Candidates(typing).Contains("日本語を書く練習"), front.Trace);
+    }
+
+    [Test]
+    public static void TypingCandidates_TapSelectsFirstClauseForPartialCommit()
+    {
+        var front = TypingCandidatesFront();
+        front.Settings.ConversionStartsAtLastClause = true;
+        var typing = front.Type("nihongowokaku")[^1];
+        var candidates = View(typing).GetProperty("typingCandidates").EnumerateArray().Select(c => c.GetString()).ToList();
+        var index = candidates.IndexOf("にほん語を");
+        Assert.True(index >= 0, front.Trace);
+        var invalid = front.Event("CandidateClicked", extra: ",\"index\":-1,\"fromTyping\":true");
+        Assert.True(!View(invalid).GetProperty("converting").GetBoolean(), front.Trace);
+
+        var selected = front.Event("CandidateClicked", extra: $",\"index\":{index},\"fromTyping\":true");
+        Assert.True(View(selected).GetProperty("converting").GetBoolean(), front.Trace);
+        Assert.Equal(0, View(selected).GetProperty("selectedClause").GetInt32(), front.Trace);
+        Assert.Equal("にほん語を", View(selected).GetProperty("clauses")[0].GetString(), front.Trace);
+        Assert.Equal(0, Commits(selected).GetArrayLength(), front.Trace);
+        var committed = front.Key(VirtualKeys.Return, shift: true);
+        Assert.Equal("にほん語を", front.Document, front.Trace);
+        Assert.Equal("かく", View(committed).GetProperty("text").GetString(), front.Trace);
+    }
+
+    [Test]
+    public static void TypingCandidates_PredictionTapStillCommitsTheWholePrediction()
+    {
+        var front = TypingCandidatesFront();
+        var typing = front.Type("nihongowokaku")[^1];
+        var prediction = Candidates(typing).IndexOf("日本語を書く練習");
+        Assert.True(prediction >= 0 && View(typing).TryGetProperty("typingCandidates", out _), front.Trace);
+        var committed = front.Event("CandidateClicked", extra: $",\"index\":{prediction}");
+        Assert.Equal("日本語を書く練習", front.Document, front.Trace);
+        Assert.Equal(JsonValueKind.Null, View(committed).ValueKind, front.Trace);
+    }
+
+    [Test]
+    public static void TypingCandidates_AppearWhenTheLiveConversionArrives()
+    {
+        using var release = new ManualResetEventSlim();
+        using var ready = new ManualResetEventSlim();
+        using var converter = new BackgroundCallbackConverter((reading, _) =>
+            reading == "きょうは" && release.Wait(5000) ? [new ConversionClause(reading, "今日は")] : null, _ => []);
+        converter.ResultReady += ready.Set;
+        var front = new Front { Converter = converter, LateResults = true, ShowTypingCandidates = true };
+        front.Settings.LiveConversion = true;
+
+        var pending = front.Type("kyouha")[^1];
+        Assert.Equal("きょうは", View(pending).GetProperty("text").GetString(), front.Trace);
+        Assert.True(!View(pending).TryGetProperty("typingCandidates", out _), front.Trace);
+        release.Set();
+        Assert.True(ready.Wait(5000), "遅れていた変換結果が届く");
+
+        var arrived = front.Event("ConversionFinished");
+        Assert.Equal("今日は", View(arrived).GetProperty("text").GetString(), front.Trace);
+        Assert.Equal("今日は", View(arrived).GetProperty("typingCandidates")[0].GetString(), front.Trace);
     }
 
     [Test]

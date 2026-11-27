@@ -66,6 +66,9 @@ internal sealed record CompositionEnv(CompositionDetector Detector, IKanjiConver
     /// </summary>
     public bool LateResults { get; init; }
 
+    /// <summary>フロントが入力中の文節の候補も出すか。</summary>
+    public bool ShowTypingCandidates { get; init; }
+
     /// <summary>変換エンジンの答えを待ってよい時刻 (<see cref="ConversionRequest.Deadline"/>)。</summary>
     public long Deadline { get; init; } = long.MaxValue;
 

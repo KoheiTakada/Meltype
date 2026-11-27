@@ -115,7 +115,7 @@ internal sealed class CompositionInput
     public bool EscReverted { get; set; }
 
     /// <summary>続けて打つ前に選んでいた候補 (読み → 文字)。</summary>
-    public Dictionary<string, string> KeptChoices { get; } = [];
+    public Dictionary<string, string> KeptChoices { get; init; } = [];
 
     /// <summary>
     /// F6〜F10 (と同じ表示の形を選ぶキー) で抜けた変換と、そのときの打った文字。確定の記録 (<see cref="CompositionCommit.CommittedClauses"/>) に使う。

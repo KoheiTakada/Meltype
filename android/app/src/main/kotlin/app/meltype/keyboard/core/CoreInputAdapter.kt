@@ -10,7 +10,7 @@ import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
 
 /** Candidate text presented by Android; indexes are preserved from the Core. */
-data class DisplayCandidate(val text: String)
+data class DisplayCandidate(val text: String, val fromTyping: Boolean = false)
 
 /**
  * Applies the Core's response (ImeOutput) to the Android editor.
@@ -54,7 +54,7 @@ internal class CoreInputAdapter(
     private fun refreshChoices() {
         val (nextChoices, nextSelected) = CoreCandidateChoices.fromView(latestView)
         choices = nextChoices
-        candidates = nextChoices.map { DisplayCandidate(it.label) }
+        candidates = nextChoices.map { DisplayCandidate(it.label, it.fromTyping) }
         selected = nextSelected
     }
 

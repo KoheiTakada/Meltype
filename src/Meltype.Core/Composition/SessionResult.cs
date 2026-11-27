@@ -29,7 +29,8 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
 {
     /// <summary>
     /// フロントに渡す JSON にする (NativeAOT でも使えるよう手書き)。View は <see cref="ForFront"/> で作ったもの。
-    /// 項目は値が無くても毎回すべて出す (null・0・false)。view と candidates だけは、出さないときに丸ごと null。
+    /// 項目は値が無くても毎回すべて出す (null・0・false)。view と candidates は、出さないときに丸ごと null。
+    /// typingCandidates は、候補があるときだけ出す。
     /// 項目を足したら、各フロントが読むか使わないかを FrontProtocolTests で決める。
     /// 確定し直す (Commits の DeleteBefore が 1 以上) なら、消す文字 (Expect。ImeSession がキャレットの前と照合済み) を removeBefore で渡す。
     /// </summary>
@@ -70,6 +71,11 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
         AppendNullable(builder, view.Suggestion);
         builder.Append(",\"typedKeys\":");
         AppendNullable(builder, view.Typed);
+        if (view.TypingCandidates is { } typing)
+        {
+            builder.Append(",\"typingCandidates\":");
+            AppendArray(builder, typing);
+        }
         builder.Append(",\"candidates\":");
         var predictions = ListsPredictions(view) == true;
         var items = predictions ? view.Predictions! : view.Candidates;

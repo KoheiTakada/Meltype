@@ -401,7 +401,7 @@ class KeyboardService : InputMethodService(), KeyListener {
             val instance = core
             val choice = coreInput.choices.getOrNull(index)
             // The Core decides what the tap does (a prediction commits; a conversion candidate is chosen for its clause).
-            if (instance != null && choice != null && coreSend(instance, ImeJson.candidateClicked(choice.nativeIndex, fieldFacts()))) {
+            if (instance != null && choice != null && coreSend(instance, ImeJson.candidateClicked(choice, fieldFacts()))) {
                 // 変換の候補なら、続けてその文節までを確定する (Shift + Enter。Core の PartialCommit)。残りの文節は未確定のまま。
                 // 最後の文節の候補なら、全部を確定する。予測候補のタップは Core が確定済みなので、変換中ではない。
                 if (coreInput.view?.converting == true) coreSend(instance, ImeJson.virtualKey(ImeJson.VK_RETURN, fieldFacts(), shift = true))

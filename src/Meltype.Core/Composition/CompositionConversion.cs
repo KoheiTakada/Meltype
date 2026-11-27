@@ -100,11 +100,11 @@ internal static class CompositionConversion
         => CompositionLifecycle.Convert(state, input, BuildConversion(input, env, trigger, preferJapanese));
 
     /// <summary>今開いている変換を変えずに、新しい文節と候補を組み立てる。背景の結果は、採用を決めてから置き換える。</summary>
-    internal static Conversion? BuildConversion(CompositionInput input, CompositionEnv env, ConversionTrigger trigger, bool preferJapanese)
+    internal static Conversion? BuildConversion(CompositionInput input, CompositionEnv env, ConversionTrigger trigger, bool preferJapanese, bool preview = false)
     {
         var asKana = input.Text.Mode is DisplayMode.Hiragana or DisplayMode.Katakana or DisplayMode.HalfWidthKatakana;
         var segments = asKana ? CompositionText.AllJapaneseSegments(CompositionText.Read(input.Text, env), env) : CompositionText.ConversionSegments(CompositionText.Read(input.Text, env), env);
-        var utility = Utilities(input, env, segments);
+        var utility = Utilities(input, env, segments, preview);
         if (utility is { Placement: UtilityPlacement.Replace })
         {
             var fixedClause = new Clause(utility.Reading ?? CompositionText.Raw(CompositionText.Read(input.Text, env)), utility.Reading is null, [.. utility.Candidates])
@@ -290,10 +290,12 @@ internal static class CompositionConversion
         clause.Alternatives is not null && SelectedAlternative(clause) is { } selected ? string.Concat(selected.Select(c => c.Reading)) : clause.Reading;
 
     /// <summary>入力の全体に一致したユーティリティ変換の候補。一致しなければ null。</summary>
-    private static UtilityCandidates? Utilities(CompositionInput input, CompositionEnv env, IReadOnlyList<CompositionSegment> segments)
+    private static UtilityCandidates? Utilities(CompositionInput input, CompositionEnv env, IReadOnlyList<CompositionSegment> segments, bool preview)
     {
         var reading = segments is [{ IsEnglish: false, Kana.Length: > 0 } only] ? only.Kana : null;
-        var context = new UtilityContext(env.Settings, env.Services.Now(), env.Clipboard, env.NowPlaying, env.Services.GitHubTitles(), env.OtherTipVersion);
+        // 入力中はクリップボードなどの外部データを要求しない。明示的に変換するときにだけ読む。
+        var context = new UtilityContext(env.Settings, env.Services.Now(), preview ? () => null : env.Clipboard,
+            preview ? () => null : env.NowPlaying, preview ? null : env.Services.GitHubTitles(), env.OtherTipVersion);
         return UtilityConversions.Convert(new UtilityInput(CompositionText.Read(input.Text, env), reading, input.Direct, context));
     }
 
@@ -754,7 +756,7 @@ internal static class CompositionConversion
     /// 変換中に文節を選んだときに、変換エンジンの候補の一覧 (はし → 橋 端 箸 …) を足す。
     /// 日本語の文節は、最初の候補とユーザー辞書・同梱の辞書の語の後ろに足す (DictionaryWordsEnd)。
     /// 英語の文節は、ローマ字として読んだかなで一覧を引き、かなの候補 (go → ご) の後ろに足す。
-    /// 打つたびには呼ばない (時間がかかることがあるため。ライブ変換では呼ばない)。今選んでいる候補はそのまま選んだ状態にする。
+    /// 入力中の一覧を作るときは待たない。今選んでいる候補はそのまま選んだ状態にする。
     /// </summary>
     internal static void Expand(CompositionEnv env, Clause clause)
     {

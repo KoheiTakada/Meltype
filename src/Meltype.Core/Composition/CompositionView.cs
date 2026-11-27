@@ -43,7 +43,11 @@ public sealed record CompositionView(
     // 変換中の文字の中のカーソルを、末尾から何文字 (UTF-16) 前に置くか (読みの途中を直している間だけ 1 以上)
     int CaretBack = 0,
     // 候補と同じ順・件数の色見本 (#rrggbbaa)。色見本が無い候補は null、一覧全体で不要なら null
-    IReadOnlyList<string?>? Colors = null);
+    IReadOnlyList<string?>? Colors = null)
+{
+    /// <summary>入力中に出す、先頭の文節の変換候補。</summary>
+    public IReadOnlyList<string>? TypingCandidates { get; init; }
+}
 
 /// <summary>
 /// キーを 1 つ押した。Ch は入力する文字 (キーボード配列は OS 側で解決済み。文字を生まないキーなら null)。

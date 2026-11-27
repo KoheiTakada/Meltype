@@ -143,7 +143,9 @@ internal static class ImeSession
             CommitRequested = _ => CommitPending(state, env),
             CommittedByApp = _ => CommittedOutside(state, env),
             // 番号は前の応答の一覧 (変換の候補か予測変換の候補か) で読む
-            CandidateClicked = clicked => state.ListedPredictions ? SelectPrediction(state, env, clicked.Index) : SelectCandidate(state, env, clicked.Index),
+            CandidateClicked = clicked => clicked.FromTyping
+                ? active ? CompositionController.SelectTypingCandidate(state.Composition, Env(state, env), clicked.Index) : Unchanged(state, env)
+                : state.ListedPredictions ? SelectPrediction(state, env, clicked.Index) : SelectCandidate(state, env, clicked.Index),
             CandidateHighlighted = highlighted => state.ListedPredictions ? Unchanged(state, env) : SelectCandidate(state, env, highlighted.Index),
             ConversionFinished = _ => active && RefreshConversion(state, env) is { } refreshed ? refreshed : Unchanged(state, env),
             CaretMoved = _ => Unchanged(state, env),
@@ -628,6 +630,7 @@ internal static class ImeSession
             After = state.Field?.After,
             CodeString = CodeInput(state) && CodeLineKind(state, before, settings) == LineKind.String,
             LateResults = lateResults,
+            ShowTypingCandidates = state.Field?.ShowTypingCandidates == true,
             Deadline = lateResults ? 0 : long.MaxValue,
             LiveCache = state.Composition.LiveCache,
             Context = () => CompositionContext.ContextOf(state.Composition, composition),
