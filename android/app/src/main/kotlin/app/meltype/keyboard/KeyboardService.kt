@@ -161,7 +161,7 @@ class KeyboardService : InputMethodService(), KeyListener {
             val response = instance.handle(event)
                 ?: throw IllegalStateException("Native Core returned no output")
             val consumed = coreInput.apply(response)
-            candidateBar?.show(coreInput.candidates, coreInput.selected)
+            candidateBar?.show(coreInput.candidates, coreInput.selected, coreInput.view?.typed)
             // The letters page shows the Core's language mode.
             if (nav.japanese != coreInput.japanese) {
                 nav.japanese = coreInput.japanese
@@ -1088,7 +1088,7 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     /**
      * 変換中は、空白キーの長押しで動かすと、選んでいる文節の区切りを伸び縮みさせる（Core に Shift + ← → を送る）。
-     * 文節を先頭から決めて、候補のタップでその文節までを確定していく。変換していない未確定の文字では、読みの中を動く（← →）。
+     * 変換していなければ、動かし始めたところで変換を始め、先頭の文節を選ぶ。文節を先頭から決めて、候補のタップでその文節までを確定していく。
      */
     override fun onCursorModeStart(): Boolean {
         cursorPosition = null
@@ -1097,6 +1097,9 @@ class KeyboardService : InputMethodService(), KeyListener {
 
     override fun onCursorMove(steps: Int) {
         if (coreInput.composing) {
+            // 変換していなければ、まず → で変換を始めて先頭の文節を選ぶ (Core の EnterClauseSelection。スペースを押さなくてよい)。
+            // 英字だけの入力などで変換に入らなければ、これまでどおり読みの中を動く。
+            if (coreInput.view?.converting != true) coreVirtualKey(ImeJson.VK_RIGHT)
             val resize = coreInput.view?.converting == true
             repeat(abs(steps)) { coreVirtualKey(if (steps < 0) ImeJson.VK_LEFT else ImeJson.VK_RIGHT, shift = resize) }
             return
