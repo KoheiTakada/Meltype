@@ -71,6 +71,8 @@ internal static class ImeContractTests
         /// <summary>OS が IME の開閉を持つフロント (TSF など) か。持たないフロント (Android) は imeOpen を送らない。</summary>
         public bool SendsImeOpen { get; init; } = true;
 
+        public bool ShowTypingCandidates { get; init; }
+
         /// <summary>入力欄の性質 (OS が知らせるもの)。</summary>
         public List<string> Traits { get; } = [];
 
@@ -115,7 +117,8 @@ internal static class ImeContractTests
             var composing = Composition.GetValueOrDefault(instance) is not null;
             var surrounding = Sends switch { "Document" => $"\"before\":{Json(Document)},\"after\":\"\",", null => "", _ => $"\"before\":{Json(Sends)},\"after\":\"\"," };
             var field = $"{{{surrounding}\"composing\":{(composing ? "true" : "false")},\"traits\":{JsonSerializer.Serialize(Traits)}" +
-                (App is null ? "" : $",\"app\":{Json(App)}") + (Selection is null ? "" : $",\"selection\":{Json(Selection)}") + "}";
+                (App is null ? "" : $",\"app\":{Json(App)}") + (Selection is null ? "" : $",\"selection\":{Json(Selection)}") +
+                (ShowTypingCandidates ? ",\"showTypingCandidates\":true" : "") + "}";
             var fieldFact = omitField ? "" : $",\"field\":{field}";
             var output = Send($"{{\"version\":{ImeHost.Version},\"type\":\"{type}\",\"instance\":{Json(instance)}{(SendsImeOpen ? $",\"imeOpen\":{(Open ? "true" : "false")}" : "")}{fieldFact}{extra}}}");
             Apply(output, instance);
@@ -824,6 +827,165 @@ internal static class ImeContractTests
             Assert.Equal(0, Commits(result).GetArrayLength(), front.Trace);
             Assert.Equal(0, phrases.Count, front.Trace);
         }
+    }
+
+    private sealed class TypingCandidatesConverter : IKanjiConverter
+    {
+        private readonly IKanjiConverter _inner = new CompositionTests.FakeConverter();
+        public List<string> Requested { get; } = [];
+        public List<string> Expanded { get; } = [];
+        public string? Standalone { get; set; }
+
+        public IReadOnlyList<ConversionClause>? Convert(ConversionRequest request)
+        {
+            Requested.Add(request.Hiragana);
+            return request.Hiragana == "にほんごを" && Standalone is { } text ? [new ConversionClause(request.Hiragana, text)] : _inner.Convert(request);
+        }
+
+        public IReadOnlyList<ConversionClause>? CompletedConversion(ConversionRequest request) =>
+            _inner.Convert(request)?.Select(c => c.Reading == "にほんごを" ? c with { Candidates = ["日本語を", "にほん語を"] } : c).ToList();
+
+        public IReadOnlyList<string> Candidates(string reading, long deadline)
+        {
+            Expanded.Add(reading);
+            return reading == "にほんごを" ? ["日本語を", "にほん語を"] : [];
+        }
+    }
+
+    private static Front TypingCandidatesFront(bool showTypingCandidates = true, TypingCandidatesConverter? converter = null)
+    {
+        converter ??= new TypingCandidatesConverter();
+        var front = new Front
+        {
+            ShowTypingCandidates = showTypingCandidates,
+            LateResults = true,
+            Converter = converter,
+            Services = new CompositionServices
+            {
+                Predictor = new Predictor(null, () => [("にほんごをかくれんしゅう", "日本語を書く練習")], null),
+                MoreCandidates = converter.Candidates,
+            },
+        };
+        front.Settings.LiveConversion = true;
+        front.Settings.PredictiveCandidates = true;
+        front.Settings.PartialCommit = true;
+        return front;
+    }
+
+    [Test]
+    public static void TypingCandidates_ShowTheFirstClauseAlongsidePredictions()
+    {
+        var front = TypingCandidatesFront();
+        var typing = front.Type("nihongowokaku")[^1];
+        Assert.Equal("日本語を書く", View(typing).GetProperty("text").GetString(), front.Trace);
+        Assert.True(!View(typing).GetProperty("converting").GetBoolean(), front.Trace);
+        var candidates = View(typing).GetProperty("typingCandidates").EnumerateArray().Select(c => c.GetString()).ToList();
+        Assert.True(candidates.Contains("にほん語を"), front.Trace);
+        Assert.True(Candidates(typing).Contains("日本語を書く練習"), front.Trace);
+
+        var converting = front.Key(' ');
+        Assert.True(View(converting).GetProperty("converting").GetBoolean(), front.Trace);
+        Assert.True(!View(converting).TryGetProperty("typingCandidates", out _), front.Trace);
+        var explicitCandidates = Candidates(converting);
+        Assert.True(candidates.SequenceEqual(explicitCandidates.Take(candidates.Count)), front.Trace);
+        Assert.True(explicitCandidates.Skip(candidates.Count).SequenceEqual(["nihongowo", "ｎｉｈｏｎｇｏｗｏ"]), front.Trace);
+    }
+
+    [Test]
+    public static void TypingCandidates_DefaultFrontStillGetsOnlyPredictions()
+    {
+        var front = TypingCandidatesFront(showTypingCandidates: false);
+        var typing = front.Type("nihongowokaku")[^1];
+        Assert.True(!View(typing).TryGetProperty("typingCandidates", out _), front.Trace);
+        Assert.True(Candidates(typing).Contains("日本語を書く練習"), front.Trace);
+    }
+
+    [Test]
+    public static void TypingCandidates_DoNotRequestStandaloneConversionsOrReorderWhenOneFinishes()
+    {
+        var converter = new TypingCandidatesConverter();
+        var front = TypingCandidatesFront(converter: converter);
+        front.Document = "毎日";
+        var typing = front.Type("nihongowokaku")[^1];
+        var shown = View(typing).GetProperty("typingCandidates").GetRawText();
+        // この打鍵には「かく」だけを別に変換する必要がない。予測の分も含め、候補を出さないフロントと同じ要求で済む。
+        var baselineConverter = new TypingCandidatesConverter();
+        var baseline = TypingCandidatesFront(showTypingCandidates: false, converter: baselineConverter);
+        baseline.Document = front.Document;
+        baseline.Type("nihongowokaku");
+        Assert.True(converter.Requested.SequenceEqual(baselineConverter.Requested), string.Join(", ", converter.Requested));
+
+        converter.Standalone = "日本語ヲ";
+        var refreshed = front.Event("ConversionFinished");
+        Assert.Equal(shown, View(refreshed).GetProperty("typingCandidates").GetRawText(), front.Trace);
+        Assert.Equal(0, converter.Expanded.Count, front.Trace);
+        Assert.True(Candidates(front.Key(' ')).Contains("日本語ヲ"), front.Trace);
+    }
+
+    [Test]
+    public static void TypingCandidates_TapSelectsFirstClauseForPartialCommit()
+    {
+        var front = TypingCandidatesFront();
+        front.Settings.ConversionStartsAtLastClause = true;
+        var typing = front.Type("nihongowokaku")[^1];
+        var candidates = View(typing).GetProperty("typingCandidates").EnumerateArray().Select(c => c.GetString()).ToList();
+        var index = candidates.IndexOf("にほん語を");
+        Assert.True(index >= 0, front.Trace);
+        var invalid = front.Event("CandidateClicked", extra: ",\"index\":-1,\"fromTyping\":true");
+        Assert.True(!View(invalid).GetProperty("converting").GetBoolean(), front.Trace);
+
+        var selected = front.Event("CandidateClicked", extra: $",\"index\":{index},\"fromTyping\":true");
+        Assert.True(View(selected).GetProperty("converting").GetBoolean(), front.Trace);
+        Assert.Equal(0, View(selected).GetProperty("selectedClause").GetInt32(), front.Trace);
+        Assert.Equal("にほん語を", View(selected).GetProperty("clauses")[0].GetString(), front.Trace);
+        Assert.Equal(0, Commits(selected).GetArrayLength(), front.Trace);
+        var refreshed = front.Event("ConversionFinished");
+        Assert.Equal("にほん語を", View(refreshed).GetProperty("clauses")[0].GetString(), front.Trace);
+        var committed = front.Key(VirtualKeys.Return, shift: true);
+        Assert.Equal("にほん語を", front.Document, front.Trace);
+        Assert.Equal("かく", View(committed).GetProperty("text").GetString(), front.Trace);
+        var continued = front.Type("desu")[^1];
+        Assert.Equal("にほん語を", front.Document, front.Trace);
+        Assert.True(View(continued).GetProperty("text").GetString()!.EndsWith("です", StringComparison.Ordinal), front.Trace);
+    }
+
+    [Test]
+    public static void TypingCandidates_PredictionTapStillCommitsTheWholePrediction()
+    {
+        var front = TypingCandidatesFront();
+        var typing = front.Type("nihongowokaku")[^1];
+        var prediction = Candidates(typing).IndexOf("日本語を書く練習");
+        Assert.True(prediction >= 0 && View(typing).TryGetProperty("typingCandidates", out _), front.Trace);
+        var committed = front.Event("CandidateClicked", extra: $",\"index\":{prediction}");
+        Assert.Equal("日本語を書く練習", front.Document, front.Trace);
+        Assert.Equal(JsonValueKind.Null, View(committed).ValueKind, front.Trace);
+    }
+
+    [Test]
+    public static void TypingCandidates_AppearWhenTheLiveConversionArrives()
+    {
+        using var release = new ManualResetEventSlim();
+        using var ready = new ManualResetEventSlim();
+        ConversionClause[] answer = [new("かわいい", "かわいい") { Candidates = ["かわいい", "可愛い"] }];
+        using var converter = new BackgroundCallbackConverter((reading, _) =>
+            reading == "かわいい" && release.Wait(5000) ? answer : null, _ => []);
+        converter.ResultReady += ready.Set;
+        var front = new Front { Converter = converter, LateResults = true, ShowTypingCandidates = true };
+        front.Settings.LiveConversion = true;
+
+        var pending = front.Type("kawaii")[^1];
+        Assert.Equal("かわいい", View(pending).GetProperty("text").GetString(), front.Trace);
+        Assert.True(!View(pending).TryGetProperty("typingCandidates", out _), front.Trace);
+        release.Set();
+        Assert.True(ready.Wait(5000), "遅れていた変換結果が届く");
+
+        var arrived = front.Event("ConversionFinished");
+        Assert.Equal("かわいい", View(arrived).GetProperty("text").GetString(), front.Trace);
+        var candidates = View(arrived).GetProperty("typingCandidates");
+        Assert.Equal("かわいい", candidates[0].GetString(), front.Trace);
+        Assert.True(candidates.EnumerateArray().Any(c => c.GetString() == "可愛い"), front.Trace);
+        var continued = front.Key('n');
+        Assert.True(!View(continued).TryGetProperty("typingCandidates", out _), front.Trace);
     }
 
     [Test]

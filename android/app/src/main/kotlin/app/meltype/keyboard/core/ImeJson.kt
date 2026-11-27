@@ -26,7 +26,7 @@ internal data class ImeFieldFacts(
 /** 確定する文字。[removeBefore] があれば、キャレットの前のその長さ (UTF-16) を消してから [text] を入れる (照合は Core が済ませている)。 */
 internal data class ImeCommit(val text: String, val removeBefore: String?, val moveCaretBack: Int)
 
-/** 一覧は 1 つだけ (変換の候補か予測変換の候補か)。CandidateClicked の番号はこの [items] の番号。 */
+/** 従来の一覧 (変換の候補か予測変換の候補か)。CandidateClicked の番号はこの [items] の番号。 */
 internal data class ImeCandidates(val items: List<String>, val selected: Int)
 
 /**
@@ -38,6 +38,7 @@ internal data class ImeView(
     val candidates: ImeCandidates?,
     val clauses: List<String> = emptyList(),
     val selectedClause: Int = 0,
+    val typingCandidates: List<String> = emptyList(),
 )
 
 /** [japanese] は、打ったら効く言語モードが日本語か (state.languageMode。受け持たない入力欄では英数)。 */
@@ -91,9 +92,12 @@ internal object ImeJson {
     /** 裏で動いていた変換が終わった。Core は結果で変換中の表示を作り直す。 */
     fun conversionFinished(field: ImeFieldFacts?): String = event("ConversionFinished", field) {}
 
-    /** 前の応答の一覧の [index] 番目をタップした。 */
-    fun candidateClicked(index: Int, field: ImeFieldFacts?): String =
-        event("CandidateClicked", field) { put("index", index) }
+    /** 前の応答の一覧から [choice] をタップした。 */
+    fun candidateClicked(choice: CoreChoice, field: ImeFieldFacts?): String =
+        event("CandidateClicked", field) {
+            put("index", choice.nativeIndex)
+            if (choice.fromTyping) put("fromTyping", true)
+        }
 
     private fun caret(focusEntered: Boolean = false, focusLeft: Boolean = false): JSONObject =
         JSONObject().put("moved", true).put("passedKey", 0).apply {
@@ -119,6 +123,7 @@ internal object ImeJson {
         field.app?.let { put("app", it) }
         put("traits", JSONArray(field.traits))
         put("canRemove", field.canRemove)
+        put("showTypingCandidates", true)
     }
 
     /** 応答 ({"version","state","result"}) の state の言語モードと result を読む。形が違えば例外を投げる (入力欄を書き換える前に)。 */
@@ -150,5 +155,8 @@ internal object ImeJson {
         },
         clauses = view.getJSONArray("clauses").let { clauses -> (0 until clauses.length()).map { clauses.getString(it) } },
         selectedClause = view.getInt("selectedClause"),
+        typingCandidates = view.optJSONArray("typingCandidates")?.let { items ->
+            (0 until items.length()).map { items.getString(it) }
+        }.orEmpty(),
     )
 }

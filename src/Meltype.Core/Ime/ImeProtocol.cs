@@ -126,9 +126,13 @@ public abstract record ImeEvent
         internal override T Match<T>(Cases<T> cases) => cases.CommittedByApp(this);
     }
 
-    /// <summary>前の応答の一覧 (view.candidates) の Index 番目をクリックした。予測変換の候補なら確定する。</summary>
+    /// <summary>前の応答の一覧の Index 番目をクリックした。予測変換の候補なら確定する。</summary>
     public sealed record CandidateClicked(int Index) : ImeEvent
     {
+        /// <summary>view.typingCandidates の番号か。省略時は view.candidates の番号。</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool FromTyping { get; init; }
+
         internal override T Match<T>(Cases<T> cases) => cases.CandidateClicked(this);
     }
 
@@ -238,6 +242,9 @@ public sealed record ImeField
     public string? Selection { get; init; }
     /// <summary>フロントの入力欄に変換中の文字がある。</summary>
     public bool Composing { get; init; }
+    /// <summary>フロントが入力中の文節の候補も表示できるか。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ShowTypingCandidates { get; init; }
     /// <summary>
     /// アプリ。アプリ別設定の名前と同じ形にする: Windows はプロセスの実行ファイル名 (Code.exe)、macOS は bundle ID (com.microsoft.VSCode)、
     /// Linux は fcitx5 の program・IBus のクライアント名のプログラムの部分 (code)、Android はパッケージ名 (com.example.app)。分からなければ null。
@@ -334,6 +341,8 @@ public sealed record ImeShortcut(int Vk, int Modifiers);
 /// <item>view: null なら変換中の表示を消す。text (確定される形)・clauses・hint・spellingSuggestion・typedKeys は、あればそのまま出す。</item>
 /// <item>view.candidates: null なら一覧を出さない。番号は numbered のときだけ出す。selectedMeaning は選んでいる候補で meaningDelayMs 止まったら出す。
 /// 番号で選ぶ出来事 (CandidateClicked・CandidateHighlighted) の index は、この一覧の番号。</item>
+/// <item>view.typingCandidates: 入力中の先頭の文節の候補。フロントが求めたときだけ文字列の一覧を出す。
+/// この一覧から選んだときは CandidateClicked に fromTyping: true を付ける。</item>
 /// </list>
 /// state.modeIndicatorMs が 0 でなければ、「あ / A」をキャレットの近くにその時間だけ出す。
 /// </summary>

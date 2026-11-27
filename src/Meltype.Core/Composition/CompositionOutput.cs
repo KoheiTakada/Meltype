@@ -52,6 +52,7 @@ internal static class CompositionOutput
         if (!consumed) state.Committed.Clear();
         // 操作ガイドを出さない設定では、入力に応じた案内 (手動判定の提案・予測など) だけ。どのフロントもこの表示を受け取る
         var view = state.Hidden || state.View is not { } shown ? null : SessionResult.ForFront(shown, settings.ShowsGuide, settings.NumberKeysSelectCandidates);
+        if (view?.TypingCandidates is not null && !env.ShowTypingCandidates) view = view with { TypingCandidates = null };
         return new SessionResult(consumed, state.Commits.ToList(), view);
     }
 
@@ -96,7 +97,12 @@ internal static class CompositionOutput
         state.View = new CompositionView(Text(view.Text), [.. view.Candidates.Select(Text)], view.SelectedIndex, view.Converting, view.Hint,
             view.Clauses?.Select(Text).ToList(), view.SelectedClause, view.Notes, view.Meaning,
             view.Suggestion is { } suggestion ? Text(suggestion) : null, view.Predictions?.Select(Text).ToList(), view.SelectedPrediction, view.Typed,
-            view.Committed is { } committed ? Text(committed) : null, view.ContextHint);
+            view.Committed is { } committed ? Text(committed) : null, view.ContextHint)
+        {
+            TypingCandidates = state.TypingConversion is { SelectedClause: var first }
+                ? [.. first.Candidates.Select(c => Text(CompositionPresentation.Candidate(first, c)))]
+                : null,
+        };
         state.Hidden = false;
     }
 
@@ -129,6 +135,7 @@ internal static class CompositionOutput
     public static void Hide(CompositionOutputState state)
     {
         state.View = null;
+        state.TypingConversion = null;
         state.Hidden = true;
     }
 

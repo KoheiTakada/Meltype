@@ -44,6 +44,7 @@ internal static class CompositionPresentation
 
     internal static void UpdateView(CompositionState state, CompositionEnv env)
     {
+        state.Out.TypingConversion = null;
         // 英数状態の判定中は何も表示しない (英語ならそのまま出るだけ)。
         var view = state.Scene.Match(new CompositionScene.Cases<ComposedView?>
         {
@@ -51,7 +52,7 @@ internal static class CompositionPresentation
             Direct = _ => null,
             Judging = _ => null,
             EnglishWord = _ => null,
-            Typing = typing => TypingView(typing.Input, env),
+            Typing = typing => TypingView(state.Out, typing.Input, env),
             Converting = converting => ConvertingView(converting, env),
         });
         if (view is null) CompositionOutput.Hide(state.Out);
@@ -82,7 +83,7 @@ internal static class CompositionPresentation
             Committed: ComposedText.Concat(clauses), ContextHint: zenzai ? "Zenzai" : null);
     }
 
-    private static ComposedView TypingView(CompositionInput input, CompositionEnv env)
+    private static ComposedView TypingView(CompositionOutputState output, CompositionInput input, CompositionEnv env)
     {
         var suggestion = CompositionText.Suggestion(input.Text, env);
         var misspelling = CompositionSpelling.MisspellingSuggestion(input, env);
@@ -102,12 +103,21 @@ internal static class CompositionPresentation
         }
         var selected = predictionIndex >= 0 ? PredictionText(predictions[predictionIndex]) : null;
         var display = selected ?? CurrentComposed(input, env, final: false);
+        if (selected is null) output.TypingConversion = TypingConversion(input, env);
         // 設定「入力中も変換候補をいくつか表示」: Space の前から候補を出す (issue #666)
-        var preview = selected is null && misspelling is null ? TypingCandidates(input, env) : null;
+        var preview = !env.ShowTypingCandidates && selected is null && misspelling is null ? TypingCandidates(input, env) : null;
         return new ComposedView(display, [.. (preview ?? []).Select(c => ComposedText.Of(SpanKind.Japanese, c))], preview?.IndexOf(display.Text) ?? -1, false, hint,
             Suggestion: Suggestion(misspelling),
             Predictions: predictions.Count > 0 ? predictions.Select(p => ComposedText.Of(SpanKind.Japanese, p.Text)).ToList() : null, SelectedPrediction: predictionIndex, Typed: TypedKeys(input, null, env),
             Committed: selected ?? CurrentComposed(input, env, final: true), ContextHint: contextHint);
+    }
+
+    private static Conversion? TypingConversion(CompositionInput input, CompositionEnv env)
+    {
+        if (!env.ShowTypingCandidates || !env.LateResults || !env.Settings.LiveConversion || input.Text.Mode != DisplayMode.Auto ||
+            input.Reconversion is not null) return null;
+        // ライブ変換と同じ前処理を使い、タップされるまでは実際の入力を変えない。
+        return CompositionText.AsCommitted(input.Text, env, _ => CompositionConversion.BuildTypingConversion(input, env));
     }
 
     /// <summary>文節 clause の候補 candidate の文字。文全体の文節の案は、確定と同じく案の文節から作る (<see cref="CompositionConversion.SplitWholeSentence"/>)。</summary>

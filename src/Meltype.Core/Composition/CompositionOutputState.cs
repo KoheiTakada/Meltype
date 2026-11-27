@@ -19,6 +19,8 @@ internal sealed class CompositionOutputState
     public readonly StringBuilder Committed = new();
 
     public CompositionView? View;
+    /// <summary>表示した候補と同じ文節・候補で変換に入るための控え。</summary>
+    public Conversion? TypingConversion;
 
     public bool Hidden;
 

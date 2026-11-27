@@ -50,6 +50,12 @@ internal sealed record CompositionEnv(CompositionDetector Detector, IKanjiConver
     /// </summary>
     public bool LateResults { get; init; }
 
+    /// <summary>フロントが入力中の文節の候補も出すか。</summary>
+    public bool ShowTypingCandidates { get; init; }
+
+    /// <summary>入力中の候補を作るときは、変換エンジンの完了済みの答えだけを読む。</summary>
+    public bool CompletedConversionsOnly { get; init; }
+
     /// <summary>変換エンジンの答えを待ってよい時刻 (<see cref="ConversionRequest.Deadline"/>)。</summary>
     public long Deadline { get; init; } = long.MaxValue;
 
@@ -116,7 +122,7 @@ internal sealed record CompositionEnv(CompositionDetector Detector, IKanjiConver
     public Action<Correction>? Corrected { get; init; }
 }
 
-internal enum ConversionTrigger { Other, Space, Tab }
+internal enum ConversionTrigger { Other, Space, Tab, TypingCandidate }
 
 internal sealed record LastCommit(string Text, bool English);
 

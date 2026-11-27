@@ -29,7 +29,8 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
 {
     /// <summary>
     /// フロントに渡す JSON にする (NativeAOT でも使えるよう手書き)。View は <see cref="ForFront"/> で作ったもの。
-    /// 項目は値が無くても毎回すべて出す (null・0・false)。view と candidates だけは、出さないときに丸ごと null。
+    /// 項目は値が無くても毎回すべて出す (null・0・false)。view と candidates は、出さないときに丸ごと null。
+    /// typingCandidates は、候補があるときだけ出す。
     /// 項目を足したら、各フロントが読むか使わないかを FrontProtocolTests で決める。
     /// 確定し直す (Commits の DeleteBefore が 1 以上) なら、消す文字 (Expect。ImeSession がキャレットの前と照合済み) を removeBefore で渡す。
     /// </summary>
@@ -69,6 +70,11 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
         AppendNullable(builder, view.Suggestion);
         builder.Append(",\"typedKeys\":");
         AppendNullable(builder, view.Typed);
+        if (view.TypingCandidates is { } typing)
+        {
+            builder.Append(",\"typingCandidates\":");
+            AppendArray(builder, typing);
+        }
         builder.Append(",\"candidates\":");
         var predictions = ListsPredictions(view) == true;
         var items = predictions ? view.Predictions! : view.Candidates;
@@ -109,7 +115,7 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
     /// フロントに渡す表示。どのフロントも、ここに入っているものをそのまま出す:
     /// text は確定される形 (OS が表示のまま確定しても、本体の確定と同じになる。打っている途中の英字は typed で見える)、
     /// hint は操作ガイドの設定を反映した案内、typed は text と違うときだけの、打ったもの、
-    /// 一覧は 1 つだけ (変換中で候補が 2 つ以上なら変換の候補、変換していなければ予測変換の候補、無ければ入力中の変換の候補)。
+    /// candidates は変換中なら変換の候補、入力中なら予測候補か表示設定による候補。先頭の文節の候補は typingCandidates で渡す。
     /// </summary>
     /// <param name="numberKeysSelect">設定「変換中の数字キーで候補を選ぶ」。番号は、数字キーで選べる変換中の候補だけに出す。</param>
     internal static CompositionView ForFront(CompositionView view, bool showGuide, bool numberKeysSelect)

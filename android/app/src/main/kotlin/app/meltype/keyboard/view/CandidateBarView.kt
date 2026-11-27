@@ -66,7 +66,7 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
             candidates.forEachIndexed { i, c ->
                 val tv = TextView(context).apply {
                     text = c.text
-                    contentDescription = "変換候補: " + c.text
+                    contentDescription = (if (c.fromTyping) "先頭の文節の変換候補: " else "候補: ") + c.text
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
                     gravity = Gravity.CENTER
                     setPadding(pad, 0, pad, 0)
@@ -77,11 +77,13 @@ class CandidateBarView(context: Context) : HorizontalScrollView(context) {
                     isSingleLine = true
                     includeFontPadding = true
                     typeface = Typeface.DEFAULT
-                    setOnClickListener { onPick?.invoke(i) }
+                    // 背景の変換で候補が入れ替わったら、前の一覧のタップを新しい一覧に使わない。
+                    setOnClickListener { if (parent == row) onPick?.invoke(i) }
                 }
                 val lp = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT)
-                lp.marginStart = (3*density).toInt()
+                // 予測候補と先頭の文節の候補は確定する範囲が違うので、境目を空ける。
+                lp.marginStart = ((if (i > 0 && c.fromTyping && !candidates[i - 1].fromTyping) 13 else 3) * density).toInt()
                 lp.marginEnd = (3*density).toInt()
                 row.addView(tv, lp)
             }

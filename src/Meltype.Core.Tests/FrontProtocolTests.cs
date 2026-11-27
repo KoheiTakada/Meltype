@@ -29,23 +29,23 @@ internal static class FrontProtocolTests
     [
         new("Meltype IME (DLL)", "native/tip/TextService.cpp", source => source, new([], Index: true),
             // 入力モードと、左右の Alt (フックで見る) は Meltype.exe (TipServer) が使う
-            Unused: ["version", "modeIndicatorMs", "insertByPaste", "keyReleases", "altKeys"],
+            Unused: ["version", "modeIndicatorMs", "insertByPaste", "keyReleases", "altKeys", "typingCandidates"],
             // Meltype.exe (TipServer) の応答: 背景の変換の結果の待ち合わせと、別ビルドの impl への応答
             Others: ["generation", "stale"]),
         new("fcitx5", "linux/fcitx5/meltype.cpp", source => source, new(["get", "str", "flag", "integer", "strings"]),
             Unused: ["version", "handlesInput", "imeOpen", "printableAscii", "printableAsciiExcept", "shortcuts", "vk", "modifiers",
-                "ctrlKeysWhileComposing", "revision", "currentWord", "insertByPaste", "keyReleases"],
+                "ctrlKeysWhileComposing", "revision", "currentWord", "insertByPaste", "keyReleases", "typingCandidates"],
             Others: []),
         new("IBus", "linux/ibus-engine-meltype", source => source, new(["get"], Index: true),
             Unused: ["version", "handlesInput", "imeOpen", "printableAscii", "printableAsciiExcept", "shortcuts", "vk", "modifiers",
-                "ctrlKeysWhileComposing", "revision", "currentWord", "insertByPaste", "keyReleases"],
+                "ctrlKeysWhileComposing", "revision", "currentWord", "insertByPaste", "keyReleases", "typingCandidates"],
             // 送る入力欄の事実
             Others: ["app", "selection"]),
         new("端末", "tui/meltype-tty", source => source, new([], Index: true),
             // 端末はキーをすべて送り (capture を見ない)、canRemove: false なので removeBefore は来ない。案内 (hint) は端末に届かないキーも書くので出さない
             Unused: ["version", "state", "handlesInput", "imeOpen", "languageMode", "modeIndicatorMs", "capture", "printableAscii", "printableAsciiExcept",
                 "shortcuts", "vk", "modifiers", "ctrlKeysWhileComposing", "altKeys", "keyReleases", "revision", "currentWord", "insertByPaste",
-                "removeBefore", "hint", "notes", "selectedMeaning", "meaningDelayMs"],
+                "removeBefore", "hint", "notes", "selectedMeaning", "meaningDelayMs", "typingCandidates"],
             Others: []),
         new("Android", "android/app/src/main/kotlin/app/meltype/keyboard/core/ImeJson.kt", source => source,
             new(["getString", "getInt", "getBoolean", "getJSONObject", "getJSONArray", "optString", "optInt", "optBoolean", "optJSONObject", "optJSONArray", "isNull"]),
@@ -59,7 +59,7 @@ internal static class FrontProtocolTests
             new([], Fields: true),
             // Input Method Kit では IME からアプリのキャレットを動かせない。
             Unused: ["version", "handlesInput", "imeOpen", "capture", "printableAscii", "printableAsciiExcept", "shortcuts", "vk", "modifiers",
-                "ctrlKeysWhileComposing", "revision", "currentWord", "moveCaretBack", "insertByPaste", "keyReleases", "altKeys"],
+                "ctrlKeysWhileComposing", "revision", "currentWord", "moveCaretBack", "insertByPaste", "keyReleases", "altKeys", "typingCandidates"],
             Others: []),
     ];
 
@@ -109,14 +109,18 @@ internal static class FrontProtocolTests
         return names;
     }
 
-    /// <summary>本体の応答に出る名前すべて。項目は値が無くても出すので、一覧と候補のある応答 1 つで揃う。</summary>
+    /// <summary>変換中と、入力中の文節の候補があるときの応答に出る名前すべて。</summary>
     private static HashSet<string> SentNames()
     {
         var state = new ImeState { Capture = new ImeCapture { Shortcuts = [new(0x19, 0)], CtrlKeysWhileComposing = [new(0x48, 2)] } };
         var view = new CompositionView("x", ["x", "y"], 0, true, "h", ["x"], 0);
-        var json = new ImeOutput(state, new SessionResult(true, [new TextEdit(0, "x")], view)).ToJson();
+        var typing = new CompositionView("x", [], -1, false, "") { TypingCandidates = ["x", "y"] };
         var names = new HashSet<string>();
-        Collect(JsonElement.Parse(json), names);
+        foreach (var shown in new[] { view, typing })
+        {
+            var json = new ImeOutput(state, new SessionResult(true, [new TextEdit(0, "x")], shown)).ToJson();
+            Collect(JsonElement.Parse(json), names);
+        }
         return names;
     }
 

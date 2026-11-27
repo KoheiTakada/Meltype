@@ -36,6 +36,11 @@ internal sealed class BackgroundCallbackConverter(
     public IReadOnlyList<ConversionClause>? Convert(ConversionRequest request) =>
         Ask(new Request(Kind.Clauses, request.Hiragana, request.Before), ConversionRequest.RemainingMs(request.Deadline))?.Clauses;
 
+    public IReadOnlyList<ConversionClause>? CompletedConversion(ConversionRequest request)
+    {
+        lock (_gate) return _answers.GetValueOrDefault(new Request(Kind.Clauses, request.Hiragana, request.Before)).Clauses;
+    }
+
     public IReadOnlyList<string> Candidates(string reading, long deadline) =>
         Ask(new Request(Kind.Candidates, reading, null), ConversionRequest.RemainingMs(deadline))?.Candidates ?? [];
 

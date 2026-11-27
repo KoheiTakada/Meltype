@@ -79,6 +79,20 @@ internal static class CompositionController
         return Result(state, env, consumed: true);
     }
 
+    /// <summary>入力中に出していた先頭の文節で変換を始め、タップした候補を選ぶ。</summary>
+    public static SessionResult SelectTypingCandidate(CompositionState state, CompositionEnv env, int index)
+    {
+        if (!env.ShowTypingCandidates || state.Scene is not CompositionScene.Typing { Input: var input } ||
+            state.Out.TypingConversion is not { } shown || index < 0 || index >= shown.SelectedClause.Candidates.Count)
+            return Current(state, env);
+
+        CompositionOutput.Begin(state.Out);
+        CompositionText.FixTypos(input.Text, env, typing: true);
+        CompositionLifecycle.Convert(state, input, shown);
+        SelectCandidateAt(state, env, index);
+        return Result(state, env, consumed: true);
+    }
+
     private static void SelectCandidateAt(CompositionState state, CompositionEnv env, int index)
     {
         // 入力中に出した候補 (設定「入力中も変換候補をいくつか表示」) をクリックしたら、変換を始めてからその候補を選ぶ

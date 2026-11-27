@@ -39,7 +39,11 @@ public sealed record CompositionView(
     string? Committed = null,
     string? ContextHint = null,
     // 一覧に番号を出すか (数字キーで選べる変換中の候補だけ。SessionResult.ForFront が決める)
-    bool Numbered = false);
+    bool Numbered = false)
+{
+    /// <summary>入力中に出す、先頭の文節の変換候補。</summary>
+    public IReadOnlyList<string>? TypingCandidates { get; init; }
+}
 
 /// <summary>キーを 1 つ押した。Ch は入力する文字 (キーボード配列は OS 側で解決済み。文字を生まないキーなら null)。</summary>
 internal readonly record struct KeyPress(int Vk, char? Ch, bool Shift, bool Control, bool Alt, bool Command, long TimeMs)
